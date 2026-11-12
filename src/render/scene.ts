@@ -15,7 +15,7 @@ import niranUrl from '../assets/niran.webp';
 import petchUrl from '../assets/petch.webp';
 
 export const SPRITES: Record<string, string> = { rin: rinUrl, somchai: somchaiUrl, daeng: daengUrl, mali: maliUrl, niran: niranUrl, petch: petchUrl };
-export interface ActorSpec { id: string; x: number; z: number; away?: boolean; outside?: boolean; work?: boolean; }
+export interface ActorSpec { id: string; look?: string; x: number; z: number; away?: boolean; outside?: boolean; work?: boolean; }
 
 // ---- calibration, in the painting's 1024x1024 space ---------------------------
 const IMG = 1024;
@@ -167,7 +167,7 @@ export class CampScene {
         const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ ...FLAT, alphaTest: 0.25, side: THREE.DoubleSide, color: '#f1e3d2' }));
         const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 20), new THREE.MeshBasicMaterial({ color: '#000', ...FLAT, opacity: 0.32 })); shadow.scale.set(15, 6, 1);
         const start: [number, number] = instant ? (l.away ? ROUTE_IN[0] : target) : ROUTE_IN[0];
-        a = { id: l.id, mesh, shadow, pos: [...start], path: [], inside: instant && wantInside, away: false, work: false, tex: new Map(), key: '', phase: this.actors.size * 0.37, flip: false };
+        a = { id: l.look ?? l.id, mesh, shadow, pos: [...start], path: [], inside: instant && wantInside, away: false, work: false, tex: new Map(), key: '', phase: this.actors.size * 0.37, flip: false };
         this.actors.set(l.id, a); this.scene.add(mesh, shadow);
       }
       a.away = !!l.away; a.work = !!l.work;

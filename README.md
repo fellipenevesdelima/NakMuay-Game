@@ -21,15 +21,30 @@ e pessoas, equipamentos, chuva e luz entram por cima, ordenados por profundidade
 recortes da própria pintura, para ficarem na frente de quem passa atrás. Os personagens usam folhas de sprite de 8 quadros.
 
 ## Estado
-Feito (tutorial completo, só Bangkok): cena das cadeiras, escolha do imóvel, portão, tatame, coach, olheira, contratos com
-consentimento, escola de treino, primeira manhã, oferta, camp de luta semana a semana (você decide ou delega ao coach),
-pesagem com probabilidade de não bater o peso, noite de várzea round a round com córner e apostas pelo caixa do camp,
-decisão dos juízes, acerto da bolsa e folha de pagamento no dia do vencimento. Salva a cada decisão.
 
-Parcial: animações (andar, guarda, ataque e trabalho do coach; faltam corda, clinch em dupla, comemoração, queda),
-som (só o gongo sintetizado), efeitos de luta (sem reação a golpe).
+Fatia 1 do redesign (temporada jogável no nível 1). O jogo não está completo.
 
-Planejado: Phuket e Chiang Mai, dívida, Código do Camp, eventos, mais instalações, narração e música, os três destinos do camp.
+**Pronto**
+- Tutorial até a primeira luta, que agora abre o camp em vez de encerrar o jogo.
+- Tela do camp com seis abas (Semana, Treinadores, Elenco, Manager, Lutas, Academia). Uma decisão avança uma semana.
+- Treinador com nível, capacidade, carga (lutadores + turistas), cansaço, confiabilidade, falta e saída. Kratom e aumento.
+- Lutador com vida útil em temporadas, corte de peso, sequência de derrotas, nocautes, ânimo e respeito pessoal. Aposentadoria por decisão do jogador.
+- Manager com três missões (talentos, contratos de luta, patrocínios). Sem oportunidade nova enquanto está fora.
+- Camp de luta de 2, 3 ou 4 semanas dentro da mesma tela, pesagem probabilística, luta de várzea de 5 rounds com nocaute.
+- Folha mensal, parcela da dívida, patrocínio, teto de caixa por nível, fim de temporada.
+- Torcida, Respeito e Clima no topo. Regras de balanceamento em `src/sim/balance.ts`.
+
+**Parcial**
+- Turistas: vagas, preço, procura e carga funcionam; ainda não aparecem no cenário.
+- Subida para o nível 2: requisitos e cobrança funcionam; pintura nova, obra e andaimes não existem.
+- Candidatos novos (Somsak, Chai, Yod) e adversários gerados usam sprites emprestados.
+- Balanceamento: provisório. Um camp com dois lutadores fecha a temporada no azul; com três, aperta.
+- Uma luta em preparação por vez.
+
+**Falta**
+- Circuitos de estádio, 3 rounds e internacional. Apostas de arquibancada com cotação viva.
+- Subida de categoria, ex-lutador virando treinador, níveis 3 a 5, Phuket e Chiang Mai.
+- Som (ElevenLabs), eventos narrativos, revisão do tailandês por falante nativo.
 
 ## Antes de lançar
 - Tailandês sem revisão de nativo.

@@ -146,7 +146,7 @@ describe('realism', () => {
     let missed: GameState | null = null, made = 0;
     for (let k = 1; k <= 200; k++) { const b = weeks(booked(['petch']), ['hard', 'hard']); const w = ok(G.runCampWeek({ ...b, fight: { ...b.fight!, rng: k * 104729 } }, 'sharpen')); if (w.fight!.weighIn!.made) made++; else missed ??= w; }
     expect(made).toBeGreaterThan(90); expect(made).toBeLessThan(175); expect(missed).not.toBeNull();
-    const w = missed!; expect(w.fight!.weighIn!.fine).toBe(1200); expect(w.fight!.energy).toBe(88); expect(w.prestige).toBe(2);
+    const w = missed!; expect(w.fight!.weighIn!.fine).toBe(1200); expect(w.fight!.energy).toBe(88); expect(w.respect).toBe(2);
     const done = G.settleFight(G.delegateRest(G.enterRing(w))); expect(done.ledger.filter(e => e.sourceType === 'weight-fine').map(e => e.amount)).toEqual([-1200]); reconciles(done);
   });
   it('the coach can run one week or the whole camp', () => {
@@ -165,7 +165,7 @@ describe('saves', () => {
   it('migrates older saves and keeps what was bought', () => {
     const v1: any = { saveVersion: 1, day: 1, region: 'bangkok', cash: 102_000, debt: 250_000, debtDueDay: 30, morale: 50, prestige: 5, step: 'placed', lang: 'pt',
       facilities: [{ id: 'mat-1', type: 'mat', x: 4, z: 3, w: 3, d: 2, level: 1 }], ledger: [{ id: 1, day: 1, amount: -190_000, sourceType: 'property', recipient: 'seller' }] };
-    const m = G.migrate(v1)!; expect(m.saveVersion).toBe(5); expect(m.step).toBe('coach'); expect(m.facilities).toHaveLength(1); expect(m.cash).toBe(102_000);
+    const m = G.migrate(v1)!; expect(m.saveVersion).toBe(6); expect(m.step).toBe('coach'); expect(m.facilities).toHaveLength(1); expect(m.cash).toBe(102_000);
   });
   it('save data round-trips mid-fight', () => {
     const s = G.simulateRound(atFight()); const back = G.migrate(JSON.parse(JSON.stringify(s)))!;

@@ -33,7 +33,7 @@ function portrait(cv: HTMLCanvasElement, id: string) {
   cv.width = cv.height = 48; const c = cv.getContext('2d')!; c.imageSmoothingEnabled = false;
   const draw = (im: HTMLImageElement) => { c.fillStyle = '#3a4d57'; c.fillRect(0, 0, 48, 48); const s = im.width * 0.86; c.drawImage(im, (im.width - s) / 2, 0, s, s, 0, 0, 48, 48); };
   let im = imgs.get(id); if (im?.complete && im.naturalWidth) return draw(im);
-  if (!im) { im = new Image(); im.src = ALL_SPRITES[id]; imgs.set(id, im); }
+  if (!im) { im = new Image(); im.src = ALL_SPRITES[G.lookOf(id)] ?? ALL_SPRITES.rin; imgs.set(id, im); }
   im.addEventListener('load', () => draw(im!), { once: true });
 }
 let audio: AudioContext | null = null;
@@ -60,18 +60,19 @@ const L = () => state.lang;
 const T = (k: string, v: Record<string, string | number> = {}) => t(L(), k, v);
 const B = (n: number) => baht(L(), n);
 const kv = (rows: [string, string, string?][]) => h('dl', { cls: 'kv' }, ...rows.flatMap(([k, v, c]) => [h('dt', {}, k), h('dd', { cls: c ?? '' }, v)]));
-const coach = () => state.staff[0]; const coachName = () => (coach() ? G.nameOf(coach().id) : '');
+const coach = () => state.staff[0]; const coachName = () => (coach() ? G.nameOf(coach().id) : G.nameOf('rin'));
+const spk = () => coach()?.id ?? 'rin';
 function title(text: string, spriteId?: string) { const t3 = h('h3'); if (spriteId) { const cv = h('canvas'); portrait(cv, spriteId); t3.append(cv); } t3.append(text); return t3; }
 
 function actors(): ActorSpec[] {
   const s = state, m = s.facilities[0], list: ActorSpec[] = [];
-  const order: G.Step[] = ['intro', 'locations', 'gate', 'walk', 'place', 'coach', 'scout', 'away', 'report', 'roster', 'school', 'morning', 'summary', 'offer', 'camp', 'weighin', 'fight', 'result', 'end'];
+  const order: G.Step[] = ['intro', 'locations', 'gate', 'walk', 'place', 'coach', 'scout', 'away', 'report', 'roster', 'school', 'morning', 'summary', 'offer', 'camp', 'weighin', 'fight', 'result', 'hub', 'season'];
   const at = (st: G.Step) => order.indexOf(s.step) >= order.indexOf(st);
   if (at('gate')) list.push({ id: 'rin', x: 6.4, z: 6.6, outside: s.step === 'gate', away: s.step === 'away' });
   if (m) {
-    const train = s.step === 'summary' || s.step === 'camp';
-    if (coach()) list.push({ id: coach().id, x: Math.min(m.x + 3.5, 9.4), z: m.z + 1, work: train });
-    s.fighters.forEach((f, i) => list.push({ id: f.id, x: m.x + 0.6 + i * 0.95, z: m.z + 1.3 - (i % 2) * 0.6, work: train }));
+    const train = s.step === 'summary' || s.step === 'camp' || s.step === 'hub';
+    s.staff.forEach((c, i) => list.push({ id: c.id, x: Math.min(m.x + 3.5, 9.4), z: m.z + 1 - i * 1.1, work: train && !c.absent, away: c.absent }));
+    s.fighters.forEach((f, i) => list.push({ id: f.id, look: G.lookOf(f.id), x: m.x + 0.6 + i * 0.95, z: m.z + 1.3 - (i % 2) * 0.6, work: train && f.plan !== 'rest' }));
   }
   return list;
 }
@@ -79,10 +80,10 @@ function actors(): ActorSpec[] {
 function render() {
   const s = state, lang = L(); document.documentElement.lang = lang === 'pt' ? 'pt-BR' : lang;
   $('day').textContent = `${T('day')} ${s.day}`; $('cash').textContent = B(s.cash);
-  $('debt').textContent = `${B(s.debt)} · ${T('debt', { n: Math.max(0, s.debtDueDay - s.day) })}`;
+  $('debt').textContent = T('debt', { v: B(s.debt), p: B(G.installment(s)) }); $('debt').hidden = s.debt <= 0;
   const pay = G.monthlyPayroll(s); $('payroll').hidden = pay === 0; $('payroll').textContent = T('payroll', { v: B(pay), d: s.wageDay });
-  $('lMorale').textContent = T('morale'); $('lPrestige').textContent = T('prestige');
-  $('mMorale').style.width = s.morale + '%'; $('mPrestige').style.width = s.prestige + '%';
+  $('lFans').textContent = `${T('fans')} ${s.fans}`; $('lRespect').textContent = `${T('respect')} ${s.respect}`; $('lMood').textContent = `${T('mood')} ${s.mood}`;
+  $('mFans').style.width = s.fans + '%'; $('mRespect').style.width = s.respect + '%'; $('mMood').style.width = s.mood + '%';
   $('lang').textContent = lang.toUpperCase(); $('reset').textContent = T('reset'); $('note').textContent = T('fictional');
   const body = $('body'), btns = $('btns'); body.replaceChildren(); btns.replaceChildren();
   const btn = (label: string, fn: () => void, cls = '', disabled = false) => { const b = h('button', { textContent: label, className: cls, disabled }); b.onclick = () => { if (!busy) fn(); }; btns.append(b); return b; };
@@ -91,8 +92,8 @@ function render() {
   // which backdrop
   const onStage = ['intro', 'locations', 'weighin', 'fight', 'result'].includes(s.step);
   stage.hidden = !onStage; stage.classList.toggle('dimmed', s.step === 'locations' || s.step === 'result' || s.step === 'weighin');
-  const showF = s.step === 'fight' || s.step === 'result'; $('app').classList.toggle('fighting', showF); $('fA').hidden = $('fB').hidden = !showF;
-  if (showF && s.fight && !busy) { fighterAnim($('fA'), s.fight.fighterId + '_guard', true); fighterAnim($('fB'), s.fight.opponentId + '_guard', false); }
+  const showF = s.step === 'fight' || s.step === 'result'; $('app').classList.toggle('fighting', showF); $('app').classList.toggle('hub', s.step === 'hub' || s.step === 'camp'); $('fA').hidden = $('fB').hidden = !showF;
+  if (showF && s.fight && !busy) { fighterAnim($('fA'), G.lookOf(s.fight.fighterId) + '_guard', true); fighterAnim($('fB'), s.fight.opp.look + '_guard', false); }
   if (!busy) { stage.classList.toggle('idle', showF); stage.classList.remove('clash'); }
 
   switch (s.step) {
@@ -129,7 +130,7 @@ function render() {
         h('button', { textContent: T('send'), disabled: s.cash < tr.cost, onclick: () => { const r = G.sendScout(state, tr.id); if (r.ok) commit(r.state); } })))));
       break;
     }
-    case 'away': speaker = coach().id; line = T('away', { n: s.scout!.returnDay, coach: coachName() }); btn(T('wait'), () => commit(G.waitForScout(s))); break;
+    case 'away': speaker = spk(); line = T('away', { n: s.scout!.returnDay, coach: coachName() }); btn(T('wait'), () => commit(G.waitForScout(s))); break;
     case 'report': {
       const src = G.TRIPS.find(x => x.id === s.scout?.tripId)!.source; line = T('report_' + src);
       body.append(h('div', { cls: 'cards' }, ...G.PROSPECTS.map(p => {
@@ -145,19 +146,19 @@ function render() {
       break;
     }
     case 'roster':
-      if (s.fighters.length) { speaker = coach().id; line = T('roster', { names: s.fighters.map(f => G.nameOf(f.id)).join(', ') }); btn(T('rosterBtn'), () => commit(G.planTraining(s))); }
+      if (s.fighters.length) { speaker = spk(); line = T('roster', { names: s.fighters.map(f => G.nameOf(f.id)).join(', ') }); btn(T('rosterBtn'), () => commit(G.planTraining(s))); }
       else { line = T('rosterNone'); btn(T('again'), () => commit(G.searchAgain(s))); }
       break;
     case 'school': {
-      speaker = coach().id; line = T(s.fighters.length > 1 ? 'school2' : 'school1');
+      speaker = spk(); line = T(s.fighters.length > 1 ? 'school2' : 'school1');
       body.append(h('div', { cls: 'cards' }, ...(['balanced', 'technical', 'clinch'] as School[]).map(k => h('div', { cls: 'card' }, title(T('sch_' + k)), h('p', {}, T('schd_' + k)),
         h('button', { textContent: T('choose'), onclick: () => commit(G.chooseSchool(state, k)) })))));
       break;
     }
-    case 'morning': speaker = coach().id; line = T('morning', { school: T('sch_' + s.school), coach: coachName() });
+    case 'morning': speaker = spk(); line = T('morning', { school: T('sch_' + s.school), coach: coachName() });
       btn(T('morningBtn'), () => commit(G.runMorning(s))); btn(T('change'), () => commit(G.reopenSchool(s)), 'ghost'); break;
     case 'summary': {
-      speaker = coach().id; line = T('summary');
+      speaker = spk(); line = T('summary');
       body.append(h('div', { cls: 'cards' }, ...s.lastSession.map(l => { const f = s.fighters.find(f => f.id === l.fighterId)!;
         return h('div', { cls: 'card' }, title(G.nameOf(l.fighterId), l.fighterId), h('p', {}, T(l.activity === 'clinch' && s.lastSession.filter(x => x.activity === 'clinch').length < 2 ? 'act_clinch1' : 'act_' + l.activity)),
           h('p', { cls: 'ok' }, Object.entries(l.gains).filter(([, v]) => v).map(([k, v]) => `+${v} ${T('g_' + k)}`).join(' · ')),
@@ -165,7 +166,7 @@ function render() {
       btn(T('summaryBtn'), () => commit(G.seeOffer(s))); break;
     }
     case 'offer': {
-      speaker = coach().id; const f = G.offeredFighter(s), name = G.nameOf(f.id), c = s.contracts.find(c => c.fighterId === f.id)!, o = G.opponentFor(f.id), pr = G.PROSPECTS.find(p => p.id === f.id)!;
+      speaker = spk(); const f = G.offeredFighter(s), name = G.nameOf(f.id), c = s.contracts.find(c => c.fighterId === f.id)!, o = G.opponentFor(f.id), pr = G.PROSPECTS.find(p => p.id === f.id)!;
       if (!G.fighterAccepts(f)) { line = T('offerTired', { name }); btn(T('restBtn'), () => commit(G.restDay(s))); break; }
       const lose = G.settlementPreview(s, false), win = G.settlementPreview(s, true);
       line = T('offer1', { n: G.TUNING.campWeeks, name });
@@ -175,46 +176,30 @@ function render() {
         [T('nextWages'), `${B(G.monthlyPayroll(s))} · ${T('day')} ${s.wageDay}`, 'red'], [T('after'), B(s.cash + lose.net)]]));
       btn(T('accept'), () => { const r = G.acceptOffer(state); if (r.ok) commit(r.state); }); btn(T('decline'), () => commit(G.declineOffer(s)), 'ghost'); break;
     }
-    case 'camp': {
-      speaker = coach().id; const f = s.fight!, name = G.nameOf(f.fighterId), pr = G.PROSPECTS.find(p => p.id === f.fighterId)!, me = s.fighters.find(x => x.id === f.fighterId)!;
-      const left = G.weeksLeft(f), final = left === 1, pct = (x: number) => Math.round(x * 100) + '%', prev = f.campLog[f.campLog.length - 1];
-      line = final ? T('campFinal', { name, w: me.fatigue }) : T('camp', { i: f.campLog.length + 1, n: f.campWeeks, name, d: f.day, kg: f.limitKg, walk: num(lang, pr.walkKg) });
-      if (prev) body.append(h('p', { cls: 'small' }, T('lastWeek', { n: prev.week, plan: T('wk_' + prev.plan), by: T('by_' + prev.by) })));
-      body.append(h('div', { cls: 'bars' }, ...(['tech', 'clinch', 'power', 'cardio'] as const).map(k => h('label', { cls: 'opp' }, h('span', {}, `${T('g_' + k)} ${me[k]}`), h('i', {}, h('b', { style: `width:${me[k]}%` } as any)))),
-        h('label', {}, h('span', {}, `${T('fatigue')} ${me.fatigue}`), h('i', {}, h('b', { style: `width:${me.fatigue}%` } as any)))));
-      const plans = final ? (['sharpen', 'rest'] as const) : (['hard', 'moderate', 'light'] as const), pick = G.coachPick(s);
-      body.append(h('div', { cls: 'cards' }, ...plans.map(k => { const pv = G.previewWeek(s, k), g = Object.entries(pv.gains).filter(([, v]) => v).map(([a, v]) => `+${v} ${T('g_' + a)}`).join(' · ');
-        return h('div', { cls: 'card' }, title(T('wk_' + k)), h('p', {}, T('wkd_' + k)),
-          kv([[T('gainsLbl'), g || T('none')], [T('wearAfter'), `${pv.fatigueAfter}/100`, pv.fatigueAfter >= 60 ? 'red' : ''],
-            ...(final ? [[T('missRisk'), pct(G.missWeightChance({ ...s, fight: { ...f, wearBeforeFinal: me.fatigue } }, k as G.FinalPlan)), 'gold'] as [string, string, string]] : [])]),
-          k === pick ? h('p', { cls: 'tag' }, `${coachName()}: ✓`) : null,
-          h('button', { textContent: T('runWeek'), onclick: () => { const r = G.runCampWeek(state, k); if (r.ok) commit(r.state); } })); })));
-      if (final) body.append(h('p', { cls: 'small' }, T('missNote', { p: G.TUNING.weighFinePct })));
-      btn(T('coachWeek'), () => { const r = G.runCampWeek(state, 'coach'); if (r.ok) commit(r.state); }, 'ghost');
-      if (!final) btn(T('autoCamp'), () => commit(G.automateCamp(state)), 'ghost');
-      break;
-    }
+    case 'hub': case 'camp': { const r = renderHub(body, btn); line = r.line; speaker = r.speaker; break; }
     case 'weighin': {
-      speaker = coach().id; const f = s.fight!, w = f.weighIn!, name = G.nameOf(f.fighterId);
+      speaker = spk(); const f = s.fight!, w = f.weighIn!, name = G.nameOf(f.fighterId);
       const c = Math.round(w.chance * 100) + '%';
       line = w.made ? T('weighMade', { name, kg: f.limitKg, c }) : T('weighMissed', { name, over: num(lang, w.overKg), fine: B(w.fine), opp: G.opponentOf(f).name, c });
       if (f.campLog.length) body.append(h('p', { cls: 'small' }, f.campLog.map(l => T('lastWeek', { n: l.week, plan: T('wk_' + l.plan), by: T('by_' + l.by) })).join(' ')));
       btn(T('enterRing'), () => commit(G.enterRing(s))); break;
     }
-    case 'fight': { speaker = coach().id; line = renderFight(body, btn); break; }
+    case 'fight': { speaker = spk(); line = renderFight(body, btn); break; }
     case 'result': {
-      speaker = coach().id; const f = s.fight!, name = G.nameOf(f.fighterId), c = s.contracts.find(c => c.fighterId === f.fighterId)!;
-      line = T('res_' + f.outcome, { name });
+      speaker = spk(); const f = s.fight!, name = G.nameOf(f.fighterId), c = s.contracts.find(c => c.fighterId === f.fighterId)!;
+      line = T('res_' + f.outcome + (f.ko ? '_ko' : ''), { name }); const me = s.fighters.find(x => x.id === f.fighterId)!;
       const tb = h('table', { cls: 'cardsT' }, h('tr', {}, h('th', {}, ''), h('th', {}, name), h('th', {}, G.opponentOf(f).name)), ...f.totals.map((x, i) => h('tr', {}, h('td', {}, T('judge', { n: i + 1 })), h('td', {}, String(x[0])), h('td', {}, String(x[1])))));
       const purse = f.purse + (f.outcome === 'win' ? f.winBonus : 0), share = Math.round(purse * c.purseSharePct / 100), fine = f.weighIn?.fine ?? 0, net = purse - share - f.travel - fine;
-      body.append(tb, h('p', { cls: 'lbl' }, T('settlement')), kv([[T('purse'), B(purse)], [T('athleteShare', { n: name, p: c.purseSharePct }), B(-share)], [T('travel'), B(-f.travel)], ...(fine ? [[T('weightFine'), B(-fine), 'red'] as [string, string, string]] : []), [T('net'), B(net), net < 0 ? 'red' : 'gold']]));
+      body.append(f.ko ? '' : tb, h('p', { cls: 'lbl' }, T('settlement')), kv([[T('purse'), B(purse)], [T('athleteShare', { n: name, p: c.purseSharePct }), B(-share)], [T('travel'), B(-f.travel)], ...(fine ? [[T('weightFine'), B(-fine), 'red'] as [string, string, string]] : []), [T('net'), B(net), net < 0 ? 'red' : 'gold']]));
       if (f.bets.length) body.append(h('p', { cls: 'small' }, T('betResult', { stake: B(f.bets.reduce((a, b) => a + b.stake, 0)), back: B(G.betPayout(f)) })));
-      btn(T('resultBtn'), () => commit(G.finish(s))); break;
+      body.append(kv([[T('lifeAfter', { name }), T('seasonsU', { a: num(lang, me.life), b: num(lang, me.lifeMax) }), me.life <= 1.5 ? 'red' : ''], [T('fans'), String(s.fans)], [T('respect'), String(s.respect)]]));
+      btn(T('resultBtn'), () => { tab = 'week'; commit(G.finish(s)); }); break;
     }
-    case 'end': {
-      speaker = coach().id; const f = s.fighters.find(x => x.id === s.fight!.fighterId)!;
-      line = T('end', { name: G.nameOf(f.id), rec: `${f.record.w}-${f.record.l}` + (f.record.d ? `-${f.record.d}` : ''), cash: B(s.cash), pay: B(G.monthlyPayroll(s)), d: s.wageDay });
-      body.append(h('p', { cls: 'tag' }, T('endNote'))); btn(T('reset'), reset, 'ghost'); break;
+    case 'season': {
+      const r = s.seasonReport!; line = T('seasonEnd', { n: r.season, i: B(r.income), o: B(r.spent) });
+      body.append(h('div', { cls: 'cards' }, ...r.rows.map(x => h('div', { cls: 'card' }, title(G.nameOf(x.id), x.id),
+        h('p', {}, T('seasonRow', { a: num(lang, x.lifeBefore), b: num(lang, x.life), w: num(lang, x.walkKg) })), x.decayed ? h('p', { cls: 'no' }, T('decayed')) : null))));
+      btn(T('seasonBtn', { n: r.season + 1 }), () => { tab = 'week'; commit(G.nextSeason(s)); }); break;
     }
   }
   $('line').textContent = line;
@@ -234,9 +219,9 @@ function renderFight(body: HTMLElement, btn: (label: string, fn: () => void, cls
   if (!last) line = `${T('preFight', v)} ${T('crowdLine', { a: f.attendance, c: f.capacity, name })}`;
   else {
     const key = last.margin > 10 ? 'n_win_clear' : last.margin > 0 ? 'n_win_close' : last.margin > -10 ? 'n_lose_close' : 'n_lose_clear';
-    line = f.outcome ? T('allDone') : `${T(key, v)}${last.energy < 40 ? ' ' + T('n_tired', v) : ''}`;
+    line = f.outcome ? T(f.ko ? 'koDone' : 'allDone') : `${T(key, v)}${last.energy < 40 ? ' ' + T('n_tired', v) : ''}`;
   }
-  body.append(h('p', { cls: 'lbl' }, f.outcome ? T('round', { n: f.rounds, t: f.rounds }) : T('round', { n: n + 1, t: f.rounds })));
+  body.append(h('p', { cls: 'lbl' }, f.outcome ? T('round', { n: f.log.length, t: f.rounds }) : T('round', { n: n + 1, t: f.rounds })));
   body.append(h('div', { cls: 'bars' },
     h('label', {}, h('span', {}, name), h('i', {}, h('b', { style: `width:${f.energy}%` } as any))),
     h('label', { cls: 'opp' }, h('span', {}, opp), h('i', {}, h('b', { style: `width:${f.oppEnergy}%` } as any)))));
@@ -260,11 +245,140 @@ function renderFight(body: HTMLElement, btn: (label: string, fn: () => void, cls
   }
   btn(T('gong', { n: n + 1 }), () => {
     bell(); busy = true; stage.classList.remove('idle'); stage.classList.add('clash');
-    fighterAnim($('fA'), state.fight!.fighterId + '_attack', true); setTimeout(() => fighterAnim($('fB'), state.fight!.opponentId + '_attack', false), 440); document.querySelectorAll<HTMLButtonElement>('#drawer button').forEach(b => (b.disabled = true));
+    fighterAnim($('fA'), G.lookOf(state.fight!.fighterId) + '_attack', true); setTimeout(() => fighterAnim($('fB'), state.fight!.opp.look + '_attack', false), 440); document.querySelectorAll<HTMLButtonElement>('#drawer button').forEach(b => (b.disabled = true));
     setTimeout(() => { busy = false; commit(G.simulateRound(state)); }, reduced ? 0 : 1900);
   });
   btn(T('delegate'), () => commit(G.delegateRest(state)), 'ghost');
   return line;
+}
+
+type Tab = 'week' | 'coach' | 'roster' | 'rin' | 'offers' | 'camp';
+let tab: Tab = 'week'; let sure: string | null = null;
+const pct = (x: number) => Math.round(x * 100) + '%';
+const money = (now: number, monthly: number): [string, string, string?][] => [[T('payNow'), B(now)], [T('monthly'), B(monthly)], [T('after'), B(state.cash - now), 'gold']];
+const act = (r: G.Result) => { if (r.ok) commit(r.state); };
+
+/** The camp between fights and during a fight camp: one screen, six tabs, one week per decision. */
+function renderHub(body: HTMLElement, btn: (label: string, fn: () => void, cls?: string, disabled?: boolean) => HTMLButtonElement): { line: string; speaker: string } {
+  const s = state, lang = L(), f = s.fight, lv = G.LEVELS[s.level - 1]; let line = '', speaker = spk();
+  const dots: Partial<Record<Tab, boolean>> = { offers: !f && s.offers.length > 0, rin: s.candidates.length + s.sponsorOffers.length > 0, coach: s.staff.length === 0 || s.staff.some(c => c.fatigue >= G.TRAINER.strainAt) };
+  body.append(h('div', { cls: 'tabs' }, ...(['week', 'coach', 'roster', 'rin', 'offers', 'camp'] as Tab[]).map(k =>
+    h('button', { ariaPressed: String(tab === k), onclick: () => { tab = k; sure = null; render(); } } as any, T('tab_' + k), dots[k] ? h('span', { cls: 'dot' }) : null))));
+  const evName = (v: string | number) => (typeof v === 'number' ? v : G.SPONSORS.some(x => x.id === v) ? T('sp_' + v) : G.nameOf(v));
+  const lifeBar = (x: G.Fighter) => h('div', { cls: 'life' + (x.life <= G.SEASON.lowLife ? ' low' : '') }, h('span', {}, `${T('lifeLbl')}: ${T('seasonsU', { a: num(lang, x.life), b: num(lang, x.lifeMax) })}`), h('i', {}, h('b', { style: `width:${x.life / x.lifeMax * 100}%` } as any)));
+
+  if (tab === 'week') {
+    const pay = G.monthlyPayroll(s) + G.installment(s);
+    line = s.seasonNo === 1 && s.seasonWeek === 0 && !f ? T('hubIntro') : T('hubLine', { s: s.seasonNo, w: Math.min(s.seasonWeek + 1, G.SEASON.weeks), n: G.SEASON.weeks, pay: B(pay), d: s.wageDay });
+    if (f) body.append(h('p', { cls: 'tag' }, T('bookedT', { name: G.nameOf(f.fighterId), opp: f.opp.name, d: f.day })));
+    if (s.lastWeek.events.length || s.lastWeek.tourists) body.append(h('p', { cls: 'small' }, [s.lastWeek.tourists ? T('lastWeekT', { t: s.lastWeek.tourists, v: B(s.lastWeek.income) }) : '', ...s.lastWeek.events.map(e => T(e.key, { n: evName(e.v.n) }))].filter(Boolean).join(' ')));
+    if (f) {
+      // fight camp: this week's plan for the athlete with a bout booked
+      const name = G.nameOf(f.fighterId), me = s.fighters.find(x => x.id === f.fighterId)!, left = G.weeksLeft(f), final = left === 1, prev = f.campLog[f.campLog.length - 1];
+      line = final ? T('campFinal', { name, w: me.fatigue }) : T('camp', { i: f.campLog.length + 1, n: f.campWeeks, name, d: f.day, kg: f.limitKg, walk: num(lang, me.walkKg) });
+      if (prev) body.append(h('p', { cls: 'small' }, T('lastWeek', { n: prev.week, plan: T('wk_' + prev.plan), by: T('by_' + prev.by) })));
+      body.append(h('div', { cls: 'bars' }, ...(['tech', 'clinch', 'power', 'cardio'] as const).map(k => h('label', { cls: 'opp' }, h('span', {}, `${T('g_' + k)} ${me[k]}`), h('i', {}, h('b', { style: `width:${me[k]}%` } as any)))),
+        h('label', {}, h('span', {}, `${T('fatigue')} ${me.fatigue}`), h('i', {}, h('b', { style: `width:${me.fatigue}%` } as any)))));
+      const plans = final ? (['sharpen', 'rest'] as const) : (['hard', 'moderate', 'light'] as const), pick = G.coachPick(s);
+      body.append(h('div', { cls: 'cards' }, ...plans.map(k => { const pv = G.previewWeek(s, k), g = Object.entries(pv.gains).filter(([, v]) => v).map(([a, v]) => `+${v} ${T('g_' + a)}`).join(' · ');
+        return h('div', { cls: 'card' }, title(T('wk_' + k)), h('p', {}, T('wkd_' + k)),
+          kv([[T('gainsLbl'), g || T('none')], [T('wearAfter'), `${pv.fatigueAfter}/100`, pv.fatigueAfter >= 60 ? 'red' : ''],
+            ...(final ? [[T('missRisk'), pct(G.missWeightChance({ ...s, fight: { ...f, wearBeforeFinal: me.fatigue } }, k as G.FinalPlan)), 'gold'] as [string, string, string]] : [])]),
+          k === pick && coach() ? h('p', { cls: 'tag' }, `${coachName()}: ✓`) : null,
+          h('button', { textContent: T('runWeek'), onclick: () => act(G.runCampWeek(state, k)) })); })));
+      if (final) body.append(h('p', { cls: 'small' }, T('missNote', { p: G.TUNING.weighFinePct })));
+    }
+    // trainer load, before the week is confirmed
+    const ld = G.loads(s); let over = false;
+    for (const c of s.staff) { const l = ld.find(x => x.id === c.id)!; const o = l.people > l.capacity; over ||= o;
+      body.append(h('div', { cls: 'load' + (o ? ' over' : '') }, h('span', {}, `${T('loadLbl', { n: G.nameOf(c.id), p: num(lang, l.people), c: l.capacity })} · ${c.absent ? T('absentNow') : T('fatigueT', { v: c.fatigue })}`), h('i', {}, h('b', { style: `width:${Math.min(100, l.people / l.capacity * 100)}%` } as any)))); }
+    if (!s.staff.length) body.append(h('p', { cls: 'no' }, T('noTrainer')));
+    if (over) body.append(h('p', { cls: 'no' }, T('overNote')));
+    body.append(kv([[T('yieldLbl'), pct(G.trainerEff(s)), G.trainerEff(s) < 0.8 ? 'red' : ''], [T('scaleLbl'), '+' + pct(G.scaleRisk(s)), G.scaleRisk(s) > 0.05 ? 'red' : '']]));
+    // tourists: places, price, what comes in
+    const tr = s.tourism, n = G.touristsNow(s);
+    const stepBtn = (d: number) => h('button', { textContent: d < 0 ? '−' : '+', disabled: tr.slots + d < 0 || tr.slots + d > G.TOURISM.maxSlots, onclick: () => commit(G.setTourism(state, tr.slots + d, tr.price)) });
+    body.append(h('p', { cls: 'lbl' }, T('touristsT')), h('div', { cls: 'step' }, h('span', {}, T('slotsLbl')), stepBtn(-1), h('b', {}, String(tr.slots)), stepBtn(1)),
+      h('div', { cls: 'seg' }, ...(['low', 'normal', 'high'] as G.Price[]).map(k => h('button', { textContent: `${T('price_' + k)} ${B(G.TOURISM.price[k].fee)}`, ariaPressed: String(tr.price === k), onclick: () => commit(G.setTourism(state, tr.slots, k)) } as any))),
+      kv([[T('demandLbl'), T('peopleU', { n: G.demand(s) })], [T('entering'), T('peopleU', { n })], [T('weekIncome'), B(n * G.TOURISM.price[tr.price].fee), 'gold']]));
+    if (f) {
+      const final = G.weeksLeft(f) === 1;
+      btn(T('coachWeek'), () => act(G.runCampWeek(state, 'coach')), 'ghost');
+      if (!final) btn(T('autoCamp'), () => commit(G.automateCamp(state)), 'ghost');
+    } else btn(T('weekBtn'), () => act(G.runWeek(state)));
+  }
+
+  else if (tab === 'coach') {
+    line = T('hubLine', { s: s.seasonNo, w: Math.min(s.seasonWeek + 1, G.SEASON.weeks), n: G.SEASON.weeks, pay: B(G.monthlyPayroll(s) + G.installment(s)), d: s.wageDay });
+    const ld = G.loads(s);
+    body.append(h('div', { cls: 'cards' }, ...s.staff.map(c => { const l = ld.find(x => x.id === c.id)!;
+      return h('div', { cls: 'card' }, title(G.nameOf(c.id), c.id), h('p', {}, T('spec_' + c.specialty)),
+        kv([[T('levelLbl'), String(c.level)], [T('capacityLbl'), `${num(lang, l.people)} / ${l.capacity}`, l.people > l.capacity ? 'red' : ''], [T('tiredLbl'), `${c.fatigue}/100`, c.fatigue >= 60 ? 'red' : ''],
+          [T('reliability'), `${c.reliability}/100`, c.reliability < 50 ? 'red' : ''], [T('wageLbl'), B(c.wage)]]),
+        h('p', { cls: 'small' }, T('kratomNote')),
+        h('button', { cls: 'quiet', textContent: c.kratomNow ? T('kratomUsed') : T('kratomBtn', { v: B(G.TRAINER.kratomCost), r: Math.min(c.fatigue, G.kratomRelief(c)) }), disabled: c.kratomNow || s.cash < G.TRAINER.kratomCost || c.fatigue === 0, onclick: () => act(G.useKratom(state, c.id)) }),
+        h('p', { cls: 'small' }, T('raiseNote')),
+        h('button', { cls: 'quiet', textContent: c.raises >= G.TRAINER.maxRaises ? T('raiseMax') : T('raiseBtn', { v: B(G.TRAINER.raiseWage) }), disabled: c.raises >= G.TRAINER.maxRaises, onclick: () => act(G.giveRaise(state, c.id)) })); })));
+    const others = G.COACHES.filter(c => !s.staff.some(x => x.id === c.id));
+    if (!s.staff.length) body.append(h('p', { cls: 'no' }, T('noTrainer')));
+    if (s.staff.length < lv.trainers) body.append(h('div', { cls: 'cards' }, ...others.map(c => h('div', { cls: 'card' }, title(c.name, c.id), h('p', {}, T('spec_' + c.specialty)), kv(money(c.signing, c.wage)),
+      h('button', { textContent: T('hire', { n: c.name }), disabled: s.cash < c.signing, onclick: () => act(G.hireTrainer(state, c.id)) })))));
+    else body.append(h('p', { cls: 'small' }, T('hireSlots', { a: s.staff.length, b: lv.trainers })));
+  }
+
+  else if (tab === 'roster') {
+    line = s.fighters.length ? T('retireNote') : T('noRoster');
+    body.append(h('p', { cls: 'small' }, `${T('rosterSlots', { a: s.fighters.length, b: lv.fighters })}${s.alumni.length ? ' · ' + T('alumniLbl', { n: s.alumni.map(a => `${G.nameOf(a.id)} (${a.record})`).join(', ') }) : ''}`));
+    body.append(h('div', { cls: 'cards' }, ...s.fighters.map(x => { const name = G.nameOf(x.id), cut = G.cutPct(x.walkKg, x.classKg), busy2 = f?.fighterId === x.id;
+      return h('div', { cls: 'card' }, title(`${name} · ${x.record.w}-${x.record.l}${x.record.d ? '-' + x.record.d : ''}`, x.id), lifeBar(x),
+        kv([[T('age'), String(x.age)], [T('levelLbl'), String(x.level)], [T('cutLbl'), T('cutV', { p: num(lang, Math.round(cut * 10) / 10), w: num(lang, x.walkKg), c: num(lang, x.classKg) }), cut >= G.LIFE.severeCutPct ? 'red' : ''],
+          [`${T('g_tech')} · ${T('g_clinch')}`, `${x.tech} · ${x.clinch}`], [`${T('g_power')} · ${T('g_cardio')}`, `${x.power} · ${x.cardio}`], [T('fatigue'), `${x.fatigue}/100`, x.fatigue >= 70 ? 'red' : ''],
+          [T('streakLbl'), String(x.streak), x.streak >= 2 ? 'red' : ''], [T('kosLbl'), String(x.kos), x.kos ? 'red' : ''], [T('spiritLbl'), String(x.spirit)], [T('credLbl'), String(x.cred)]]),
+        busy2 ? h('p', { cls: 'tag' }, T('inFightCamp')) : h('div', { cls: 'seg' }, ...(['train', 'rest'] as const).map(k => h('button', { textContent: T('plan_' + k), ariaPressed: String(x.plan === k), onclick: () => commit(G.setPlan(state, x.id, k)) } as any))),
+        busy2 ? null : h('button', { cls: sure === x.id ? 'warn' : 'quiet', textContent: T(sure === x.id ? 'retireSure' : 'retireBtn', { n: name }), onclick: () => { if (sure === x.id) { sure = null; act(G.retire(state, x.id)); } else { sure = x.id; render(); } } })); })));
+  }
+
+  else if (tab === 'rin') {
+    speaker = 'rin'; const m = s.manager.mission;
+    line = m ? T('rinAway', { k: T('mis_' + m.kind), d: m.returnDay }) : T('rinHome');
+    if (s.candidates.length) body.append(h('p', { cls: 'lbl' }, T('candidatesT')), h('div', { cls: 'cards' }, ...s.candidates.map(id => { const p = G.PROSPECTS.find(p => p.id === id)!, e = G.appraise(s, id);
+      const why = p.level > lv.maxFighterLevel ? T('refusesLevel', { n: p.name, l: e.needsLevel }) : s.fighters.length >= lv.fighters ? T('rosterFull') : p.needsClinchCoach && !s.staff.some(c => c.specialty === 'clinch') ? T('refusesCoach', { n: p.name }) : '';
+      return h('div', { cls: 'card' }, title(p.name, p.id),
+        kv([[T('age'), String(p.age)], [T('levelLbl'), String(p.level)], [T('needsLevel'), String(e.needsLevel), e.needsLevel > s.level ? 'red' : ''], [T('weightClass'), `${p.weightKg} kg · ${T('div_' + p.sex)}`], [T('walk'), num(lang, p.walkKg) + ' kg'], [T('style'), T('style_' + p.style)], [T('record'), p.record],
+          [T('potential'), `${e.low}–${e.high}`], [T('lifeLbl'), T('seasonsU', { a: p.life, b: p.life })]]),
+        kv([...money(p.signing, p.stipend), [T('purseAsk'), p.purseSharePct + '%']]),
+        why ? h('p', { cls: 'no' }, why) : h('button', { textContent: T('offer', { n: p.name }), disabled: s.cash < p.signing, onclick: () => act(G.signCandidate(state, id)) })); })), h('p', { cls: 'small' }, T('rights')));
+    const sps = [...s.sponsors.map(x => ({ id: x.id, active: x.monthsLeft })), ...s.sponsorOffers.map(id => ({ id, active: 0 }))];
+    if (sps.length) body.append(h('p', { cls: 'lbl' }, T('sponsorsT')), h('div', { cls: 'cards' }, ...sps.map(x => { const sp = G.SPONSORS.find(y => y.id === x.id)!, needFans = (sp as any).minFans as number | undefined;
+      return h('div', { cls: 'card' }, title(T('sp_' + sp.id)), h('p', {}, `${T('spTerms', { v: B(sp.monthly), m: sp.months })}. ${needFans ? T('spNeedFans', { n: needFans }) : T('spNeed', { n: sp.minFights })}.`),
+        x.active ? h('p', { cls: 'ok' }, T('spActive', { m: x.active })) : h('button', { textContent: T('spSign'), disabled: !!needFans && s.fans < needFans, onclick: () => act(G.signSponsor(state, sp.id)) })); })));
+    if (!m) body.append(h('div', { cls: 'cards' }, ...(Object.keys(G.MISSIONS) as G.MissionKind[]).map(k => { const x = G.MISSIONS[k];
+      return h('div', { cls: 'card' }, title(T('mis_' + k)), h('p', {}, T('misd_' + k)), kv([[T('duration'), T('weeksU', { n: x.weeks })], [T('payNow'), B(x.cost)], [T('after'), B(s.cash - x.cost), 'gold']]),
+        h('button', { textContent: T('send'), disabled: s.cash < x.cost, onclick: () => act(G.sendManager(state, k)) })); })));
+  }
+
+  else if (tab === 'offers') {
+    line = f ? T('bookedT', { name: G.nameOf(f.fighterId), opp: f.opp.name, d: f.day }) : s.offers.length ? T('hubLine', { s: s.seasonNo, w: Math.min(s.seasonWeek + 1, G.SEASON.weeks), n: G.SEASON.weeks, pay: B(G.monthlyPayroll(s) + G.installment(s)), d: s.wageDay }) : T('noOffers');
+    body.append(h('div', { cls: 'cards' }, ...s.offers.map(o => { const x = s.fighters.find(y => y.id === o.fighterId)!, name = G.nameOf(o.fighterId), c = s.contracts.find(c => c.fighterId === o.fighterId)!, lose = G.offerPreview(s, o, false), win = G.offerPreview(s, o, true), tired = x.fatigue >= 70;
+      return h('div', { cls: 'card' }, title(T('offerFor', { name, opp: o.opp.name }), o.fighterId),
+        kv([[T('opponent'), `${o.opp.name} (${o.opp.record})`], [T('weightClass'), `${x.classKg} kg · ${T('div_' + x.sex)}`], [T('campWeeksLbl'), String(o.campWeeks)], [T('purse'), B(o.purse)], [T('winBonus'), B(o.winBonus)],
+          [T('athleteShare', { n: name, p: c.purseSharePct }), B(-lose.share)], [T('travel'), B(-o.travel)], [T('netLose'), B(lose.net), lose.net < 0 ? 'red' : 'gold'], [T('netWin'), B(win.net), 'gold'], [T('fatigue'), `${x.fatigue}/100`, tired ? 'red' : '']]),
+        h('p', { cls: 'small' }, T('expires', { d: o.expiresDay })),
+        f ? h('p', { cls: 'no' }, T('oneFight')) : tired ? h('p', { cls: 'no' }, T('tiredNo', { name })) : h('button', { textContent: T('accept'), disabled: s.cash < o.travel, onclick: () => { tab = 'week'; act(G.takeOffer(state, o.id)); } })); })));
+  }
+
+  else {
+    const c = G.levelCheck(s); line = T('lvlNow', { n: s.level, name: T('lvl_' + s.level) });
+    body.append(kv([[T('trainersSlots'), T('ofU', { a: s.staff.length, b: lv.trainers })], [T('fightersSlots'), T('ofU', { a: s.fighters.length, b: lv.fighters })], [T('cashCap'), Number.isFinite(lv.cashCap) ? B(lv.cashCap) : '∞', s.cash > lv.cashCap * 0.9 ? 'red' : '']]), h('p', { cls: 'small' }, T('capNote')));
+    if (c) {
+      body.append(h('p', { cls: 'lbl' }, T('nextLvl', { name: T('lvl_' + c.next.level) })),
+        kv([[T('reqFans'), `${c.fans ? '✓' : '✗'} ${T('ofU', { a: s.fans, b: c.next.fans })}`, c.fans ? 'gold' : 'red'], [T('reqWins'), `${c.goal ? '✓' : '✗'} ${T('ofU', { a: s.wins, b: c.next.goalWins })}`, c.goal ? 'gold' : 'red'],
+          [T('reqCost'), `${c.cash ? '✓' : '✗'} ${B(c.next.cost)}`, c.cash ? 'gold' : 'red'], [T('after'), B(s.cash - c.next.cost)],
+          [T('trainersSlots'), `${lv.trainers} → ${c.next.trainers}`], [T('fightersSlots'), `${lv.fighters} → ${c.next.fighters}`], [T('cashCap'), `${B(lv.cashCap)} → ${B(c.next.cashCap)}`]]), h('p', { cls: 'small' }, T('upNote')));
+      btn(T('upBtn'), () => act(G.levelUp(state)), '', !(c.fans && c.goal && c.cash) || !!f);
+    } else body.append(h('p', { cls: 'small' }, T('lvlLater')));
+  }
+  return { line, speaker };
 }
 
 // A click or tap pins the mat; mouse hover only previews until then, so moving to the button keeps the spot.
@@ -279,7 +393,7 @@ function point(e: PointerEvent, pin: boolean) {
 }
 canvas.addEventListener('pointerdown', e => point(e, true));
 canvas.addEventListener('pointermove', e => { if (e.buttons) point(e, true); else if (e.pointerType === 'mouse') point(e, false); });
-function reset() { const lang = state.lang; G.clearSave(); ghost = null; pinned = false; warn = false; busy = false; first = true; state = G.newGame(lang); G.save(state); render(); }
+function reset() { tab = 'week'; sure = null; const lang = state.lang; G.clearSave(); ghost = null; pinned = false; warn = false; busy = false; first = true; state = G.newGame(lang); G.save(state); render(); }
 $('lang').onclick = () => { if (!busy) commit({ ...state, lang: nextLang(state.lang) }); };
 $('reset').onclick = () => { if (!busy) reset(); };
 

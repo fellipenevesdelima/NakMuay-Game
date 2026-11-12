@@ -105,3 +105,19 @@ div.fighter { background-repeat: no-repeat; background-position: 0 0; translate:
 @media (prefers-reduced-motion: reduce) { #stage.clash .hit { animation: none; } }
 #view { image-rendering: auto; }
 @media (orientation: portrait) { #drawer { max-height: 52%; } }
+
+/* ---- season hub ---- */
+#mRespect { background: var(--gold); } #mFans { background: var(--red); }
+.meters { gap: 8px; } .meters label { gap: 4px; }
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.tabs button { min-height: 34px; padding: 4px 9px; font: inherit; font-size: 12px; border-radius: 4px; border: 1px solid rgba(240,229,205,.3); background: transparent; color: var(--ivory); position: relative; }
+.tabs button[aria-pressed="true"] { background: var(--ivory); color: var(--base); font-weight: 700; }
+.tabs button .dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+.load { display: grid; gap: 3px; font-size: 12px; } .load i { display: block; height: 9px; background: rgba(240,229,205,.18); border-radius: 3px; overflow: hidden; position: relative; }
+.load b { display: block; height: 100%; background: var(--info); } .load.over b { background: var(--red); } .load.over { color: #e9a08e; }
+.life i { display: block; height: 8px; background: rgba(240,229,205,.18); border-radius: 3px; overflow: hidden; } .life b { display: block; height: 100%; background: var(--gold); } .life.low b { background: var(--red); }
+.life { display: grid; gap: 3px; font-size: 12px; }
+.step { display: flex; align-items: center; gap: 8px; font-size: 13px; } .step button { width: 40px; min-height: 40px; font: inherit; font-size: 18px; border-radius: 5px; border: 1px solid rgba(240,229,205,.35); background: transparent; color: var(--ivory); } .step b { min-width: 22px; text-align: center; }
+.card button.quiet { background: transparent; border-color: rgba(240,229,205,.4); color: var(--ivory); font-weight: 400; font-size: 12.5px; }
+.card button.warn { background: #6d2d1f; }
+@media (orientation: portrait) { #app.hub #drawer { max-height: 58%; } #app.hub #line { font-size: 13.5px; margin-bottom: 6px; } }

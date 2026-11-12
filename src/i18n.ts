@@ -1,4 +1,5 @@
 import type { Lang } from './sim/state';
+import { enSeason, ptSeason, thSeason } from './i18n-season';
 // Thai strings are AI-drafted and NOT yet reviewed by a native speaker.
 type Dict = Record<string, string>;
 const pt: Dict = {
@@ -172,6 +173,7 @@ const th: Dict = {
   avail_daeng: 'เช้าและบ่าย', style_mat: 'มวยหมัด', div_m: 'รุ่นชาย', div_f: 'รุ่นหญิง', weightClass: 'พิกัดน้ำหนัก', missRisk: 'ความเสี่ยงชั่งไม่ผ่าน', missNote: 'เป็นความน่าจะเป็น ไม่ใช่ความแน่นอน ถ้าชั่งไม่ผ่าน: ถูกปรับ {p}% ของค่าตัวให้คู่ชก บารมีลด และนักมวยขึ้นเวทีด้วยแรงที่น้อยลง', weighMade: 'ชั่งน้ำหนักทางการ: {name}ผ่านที่ {kg} กก. ความเสี่ยงอยู่ที่ {c}', weighMissed: 'ชั่งน้ำหนักทางการ: {name}เกิน {over} กก. ความเสี่ยงอยู่ที่ {c} ถูกปรับ {fine} ให้มุมของ{opp} และโปรโมเตอร์จดไว้แล้ว', enterRing: 'ขึ้นเวที', weightFine: 'ค่าปรับน้ำหนักเกิน',
   camp: 'เก็บตัวก่อนชก: สัปดาห์ที่ {i} จาก {n} {name}ชกวันที่ {d} พิกัด {kg} กก. น้ำหนักปกติ {walk} กก.', campFinal: 'สัปดาห์สุดท้ายก่อนชั่งน้ำหนัก {name}มีความล้า {w}/100 ต้องเลือกระหว่างเก็บรายละเอียดกับพักให้สด', wk_hard: 'ซ้อมหนัก', wk_moderate: 'ซ้อมปานกลาง', wk_light: 'สัปดาห์เบา', wk_sharpen: 'ซ้อมเพิ่ม', wk_rest: 'พัก', wkd_hard: 'พัฒนามากที่สุด แต่ล้ามาก', wkd_moderate: 'พัฒนาเล็กน้อย ล้าน้อย', wkd_light: 'ไม่พัฒนา แต่ร่างกายฟื้นตัว', wkd_sharpen: 'เก็บรายละเอียดครั้งสุดท้าย เสี่ยงชั่งไม่ผ่านมากขึ้น', wkd_rest: 'ฟื้นตัวและขึ้นเวทีสด ไม่ได้พัฒนา', wearAfter: 'ความล้าหลังจากนั้น', gainsLbl: 'สิ่งที่ได้', none: 'ไม่มี', runWeek: 'ทำแบบนี้และข้ามไปสัปดาห์ถัดไป', coachWeek: 'ให้ครูตัดสินใจสัปดาห์นี้', autoCamp: 'ให้ครูคุมจนถึงวันชั่งน้ำหนัก', lastWeek: 'สัปดาห์ที่ {n}: {plan} ตัดสินใจโดย{by}', by_player: 'คุณ', by_coach: 'ครู', payrollPaid: 'จ่ายเงินเดือนวันที่ {d}: {v}',
 };
+Object.assign(pt, ptSeason); Object.assign(en, enSeason); Object.assign(th, thSeason);
 const all: Record<Lang, Dict> = { pt, en, th };
 const locale: Record<Lang, string> = { pt: 'pt-BR', en: 'en-US', th: 'th-TH' };
 export const t = (lang: Lang, key: string, vars: Record<string, string | number> = {}) =>
