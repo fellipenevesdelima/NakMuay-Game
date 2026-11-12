@@ -91,3 +91,17 @@ label.toggle { display: flex; gap: 8px; align-items: center; font-size: 12px; mi
 @media (orientation: portrait) { #app.fighting #stage .sq { top: 25%; } #app.fighting #drawer { max-height: 57%; } }
 .chip { font-size: 12px; padding: 4px 7px; }
 @media (orientation: landscape) and (max-height: 480px) { #portrait { display: none; } #line { font-size: 14px; margin-bottom: 6px; } }
+
+/* ---- animated ring fighters (sprite sheets) ---- */
+div.fighter { background-repeat: no-repeat; background-position: 0 0; translate: -50% 0; image-rendering: auto; }
+#fA { left: 48%; } #fB { left: 59%; }
+#stage.idle .fighter { animation: none; }
+@keyframes sheet { to { background-position: 100% 0; } }
+#stage.clash #fA { transform: translateX(22%); } #stage.clash #fB { transform: translateX(-22%); }
+.fighter { transition: transform .35s ease-out; }
+.hit { position: absolute; left: 53.5%; top: 47%; width: 5%; aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; background: radial-gradient(circle, rgba(255,244,214,.95), rgba(255,200,120,0) 70%); opacity: 0; pointer-events: none; }
+#stage.clash .hit { animation: hit .88s steps(1) infinite; }
+@keyframes hit { 0%, 38% { opacity: 0; } 40%, 48% { opacity: .9; } 50%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #stage.clash .hit { animation: none; } }
+#view { image-rendering: auto; }
+@media (orientation: portrait) { #drawer { max-height: 52%; } }

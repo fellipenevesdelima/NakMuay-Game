@@ -28,9 +28,10 @@ describe('first mat', () => {
     const s = withMat(); expect(s.cash).toBe(102_000); expect(s.facilities).toHaveLength(1);
     expect(G.buyMat(s, 0, 0).ok).toBe(false); reconciles(s);
   });
-  it('rejects pillars, passage, gutter and out of bounds', () => {
+  it('rejects pillars, passage and out of bounds', () => {
     const s = placing();
-    for (const [x, z] of [[1, 2], [4, 0], [0, 6], [10, 3]]) expect(G.canPlace(s, x, z)).toBe(false);
+    for (const [x, z] of [[1, 2], [2, 5], [3, 6], [8, 3], [4, 7]]) expect(G.canPlace(s, x, z)).toBe(false);
+    expect(G.canPlace(s, 4, 3)).toBe(true);
     expect(G.buyMat(s, 1, 2)).toEqual({ ok: false, reason: 'blocked' });
   });
   it('keeps cash and map coherent when money is short', () => { expect(G.buyMat({ ...placing(), cash: 100 }, 4, 3)).toEqual({ ok: false, reason: 'cash' }); });

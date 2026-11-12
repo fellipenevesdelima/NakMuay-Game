@@ -48,15 +48,14 @@ export const REGIONS = [
   { id: 'phuket' as const, price: 150_000, open: false },
   { id: 'chiangmai' as const, price: 110_000, open: false },
 ];
-export const GRID = { w: 12, d: 8 };
+export const GRID = { w: 10, d: 8 };
 
-// Cells where nothing can be built: pillars, entrance passage, floor gutter.
+// Cells where nothing can be built: the two pillars and the passage behind the entrance.
+// The grid is calibrated on the camp painting, so these match what the player sees.
 const BLOCKED: [number, number][] = [
-  [2, 2], [9, 2], [2, 5], [9, 5],
-  [4, 0], [5, 0], [6, 0], [7, 0],
-  [0, 6], [0, 7],
+  [3, 2], [3, 6], [3, 7],
+  [4, 7], [5, 7],
 ];
-export const PILLARS: [number, number][] = BLOCKED.slice(0, 4);
 export const isBlocked = (x: number, z: number) => BLOCKED.some(([bx, bz]) => bx === x && bz === z);
 
 export type Result = { ok: true; state: GameState } | { ok: false; reason: 'step' | 'blocked' | 'cash' | 'declined' | 'unknown' | 'tired' | 'limit' };

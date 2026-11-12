@@ -1,247 +1,230 @@
-// Rendering layer: builds the Bangkok plot from data. Knows nothing about money or rules.
+// Rendering layer. The camp is a painted backdrop with a calibrated floor plane: simulation grid cells are mapped onto
+// the painting through a homography, and people, equipment and effects are layered on top, sorted by depth.
+// It knows nothing about money or rules.
 import * as THREE from 'three';
-import { GRID, PILLARS, type Facility } from '../sim/state';
-
-import floorUrl from '../assets/floor.webp';
-import wallUrl from '../assets/wall.webp';
-import roofUrl from '../assets/roof.webp';
-import alleyUrl from '../assets/alley.webp';
+import { GRID, type Facility } from '../sim/state';
+import { SHEETS, type Sheet } from '../assets/anim';
+import campUrl from '../assets/camp.webp';
+import matUrl from '../assets/mat.webp';
 import shutterUrl from '../assets/shutter.webp';
-import postersUrl from '../assets/posters.webp';
 import rinUrl from '../assets/rin.webp';
-import cartUrl from '../assets/cart.webp';
-import plantsUrl from '../assets/plants.webp';
-import scooterUrl from '../assets/scooter.webp';
 import somchaiUrl from '../assets/somchai.webp';
 import daengUrl from '../assets/daeng.webp';
-import petchUrl from '../assets/petch.webp';
 import maliUrl from '../assets/mali.webp';
 import niranUrl from '../assets/niran.webp';
+import petchUrl from '../assets/petch.webp';
 
 export const SPRITES: Record<string, string> = { rin: rinUrl, somchai: somchaiUrl, daeng: daengUrl, mali: maliUrl, niran: niranUrl, petch: petchUrl };
-export interface ActorSpec { id: string; x: number; z: number; away?: boolean; busy?: boolean; }
-interface Actor { sp: THREE.Sprite; gx: number; gz: number; away: boolean; busy: boolean; phase: number; }
-const GATE = { x: 6, z: 0.5 }, OUTSIDE = { x: 6, z: -3.4 };
+export interface ActorSpec { id: string; x: number; z: number; away?: boolean; outside?: boolean; work?: boolean; }
 
-const PIXEL = 2; // screen pixels per rendered pixel (chunky pixel-art look)
+// ---- calibration, in the painting's 1024x1024 space ---------------------------
+const IMG = 1024;
+// Homography: unit square (back corner, right corner, front corner, left corner of the visible floor) -> painting pixels.
+const M = [224.8329, -207.7809, 482.0, 46.6276, 77.6411, 366.0, -0.0748, -0.1267, 1.0];
+const MI = (() => { const m = new THREE.Matrix3().set(M[0], M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8]).invert().elements; return [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]; })();
+function toPx(x: number, z: number): [number, number] { const u = x / GRID.w, v = z / GRID.d, w = M[6] * u + M[7] * v + M[8]; return [(M[0] * u + M[1] * v + M[2]) / w, (M[3] * u + M[4] * v + M[5]) / w]; }
+function toGrid(px: number, py: number): [number, number] { const w = MI[6] * px + MI[7] * py + MI[8]; return [(MI[0] * px + MI[1] * py + MI[2]) / w * GRID.w, (MI[3] * px + MI[4] * py + MI[5]) / w * GRID.d]; }
+const PILLARS: [number, number, number, number][] = [[507, 335, 537, 440], [430, 418, 461, 530]];           // x0, y0, x1, y1
+const FRONT_WALL: [number, number][] = [[305, 510], [625, 615], [627, 740], [600, 735], [600, 660], [338, 572], [338, 640], [305, 640]];
+const OPENING = { tl: [338, 572], tr: [600, 660], br: [600, 737], bl: [338, 640] } as const;           // where the shutter hangs
+const ROUTE_IN: [number, number][] = [[300, 770], [455, 705], [470, 645]];                              // street -> gutter -> under the beam
+const DOORSTEP: [number, number] = [430, 712];
+const FLOOR_CENTRE: [number, number] = [540, 490];
+const PERSON = 60;                                                                                     // standing height in painting pixels
 
 const loader = new THREE.TextureLoader();
-/** Loads a generated texture (art made for this game; see README). */
-function load(url: string, repeat?: [number, number]) {
-  const t = loader.load(url); t.colorSpace = THREE.SRGBColorSpace;
-  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(...repeat); }
-  return t;
+function load(url: string) { const t = loader.load(url); t.colorSpace = THREE.SRGBColorSpace; return t; }
+const P = (px: number, py: number, z = 0) => new THREE.Vector3(px, -py, z);
+// Everything is one flat stack ordered by renderOrder (feet position), so nothing relies on the depth buffer.
+const FLAT = { transparent: true, depthTest: false, depthWrite: false } as const;
+/** A flat polygon that shows the matching part of the backdrop: used to put walls and pillars in front of people. */
+function cutout(points: [number, number][], map: THREE.Texture, order: number) {
+  const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, -y)));
+  const g = new THREE.ShapeGeometry(shape); const pos = g.getAttribute('position'); const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) { uv[i * 2] = pos.getX(i) / IMG; uv[i * 2 + 1] = 1 + pos.getY(i) / IMG; }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map, ...FLAT })); m.renderOrder = order; return m;
 }
-/** Upright billboard anchored at its feet; `height` is on-screen height in world units. */
-function sprite(url: string, height: number, x: number, z: number) {
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, alphaTest: 0.35, color: '#e6d6c4' }));
-  sp.center.set(0.5, 0); sp.position.set(x, 0, z); sp.scale.set(height * 0.6, height, 1);
-  sp.material.map = loader.load(url, t => { const im = t.image as HTMLImageElement; sp.scale.set(height * im.width / im.height, height, 1); });
-  sp.material.map.colorSpace = THREE.SRGBColorSpace;
-  return sp;
+/** A textured patch lying on the floor plane, subdivided per half cell so it follows the painting's perspective. */
+function floorPatch(x: number, z: number, w: number, d: number, mat: THREE.Material) {
+  const nx = w * 2, nz = d * 2, pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) { const [px, py] = toPx(x + i / 2, z + j / 2); pos.push(px, -py, 0); uv.push(i / nx, 1 - j / nz); }
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, e = c + 1; idx.push(a, c, b, b, c, e); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
+  return new THREE.Mesh(g, mat);
 }
-function rng(seed: number) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296); }
-const mat = (o: THREE.MeshStandardMaterialParameters) => new THREE.MeshStandardMaterial({ roughness: 0.9, ...o });
-function box(w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number) {
-  const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); return b;
+
+interface Actor {
+  id: string; mesh: THREE.Mesh; shadow: THREE.Mesh; pos: [number, number]; path: [number, number][]; inside: boolean; away: boolean; work: boolean;
+  tex: Map<string, THREE.Texture>; key: string; phase: number; flip: boolean;
 }
 
 export class CampScene {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private cam = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 200);
-  private target = new THREE.Vector3(GRID.w / 2, 0, GRID.d / 2 - 0.6);
+  private cam = new THREE.OrthographicCamera(0, IMG, 0, -IMG, -10, 10);
+  private backdrop = load(campUrl);
   private shutter!: THREE.Mesh; private shutterOpen = 0; private shutterGoal = 0;
-  private tube!: THREE.PointLight; private tubeMesh!: THREE.Mesh;
+  private night!: THREE.Mesh; private glow!: THREE.Mesh;
+  private ghost: THREE.Mesh | null = null; private ghostMat = new THREE.MeshBasicMaterial({ color: '#f0e5cd', transparent: true, opacity: 0.5, depthTest: false });
+  private rain!: THREE.LineSegments;
   private actors = new Map<string, Actor>();
-  private ghost!: THREE.Mesh; private rain!: THREE.Points; private drip!: THREE.Mesh;
-  private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Group>();
-  private ray = new THREE.Raycaster(); private plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Mesh>();
+  private matTex = load(matUrl);
   private clock = new THREE.Clock(); private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  private unitsPerPx = 1; private view = { x: 0, y: 0 };
 
   constructor(private canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
-    this.renderer.setPixelRatio(1);
-    this.scene.background = new THREE.Color('#14100e');
-    this.scene.fog = new THREE.Fog('#14100e', 44, 72);
-    this.build();
-    this.resize();
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'low-power' });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); this.renderer.sortObjects = true;
+    this.scene.background = new THREE.Color('#0d0a08');
+    this.build(); this.resize();
     this.renderer.setAnimationLoop(() => this.frame());
   }
 
   private build() {
     const s = this.scene;
-    s.add(new THREE.AmbientLight('#9a8c80', 1.7));
-    const dusk = new THREE.DirectionalLight('#ffb070', 0.85); dusk.position.set(10, 12, 6); s.add(dusk);
-    const sky = new THREE.DirectionalLight('#6f93a8', 0.5); sky.position.set(-6, 10, -8); s.add(sky);
-    const lamp = (col: string, power: number, x: number, y: number, z: number, dist = 14) => { const l = new THREE.PointLight(col, power, dist, 1.6); l.position.set(x, y, z); s.add(l); return l; };
-    lamp('#ff9a4a', 40, 6, 3.2, -2.6, 18); lamp('#ffb060', 22, 13.6, 2.6, 4, 12); lamp('#ffa850', 20, -2, 2.4, 9.5, 12); lamp('#ff3f7a', 16, -2.2, 2.2, 3, 10);
-    this.tube = lamp('#ffd9a0', 0, 6, 2.6, 3.5, 20);
-
-    // --- ground ---
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(56, 56), mat({ map: load(alleyUrl, [16, 16]), roughness: 0.3, metalness: 0.3 }));
-    ground.rotation.x = -Math.PI / 2; ground.position.set(6, -0.02, 4); s.add(ground);
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(GRID.w, 0.2, GRID.d), mat({ map: load(floorUrl, [GRID.w / 4, GRID.d / 4]), roughness: 0.55, metalness: 0.1 }));
-    floor.position.set(GRID.w / 2, -0.1, GRID.d / 2); s.add(floor);
-
-    // --- walls (far sides full height, near sides cut away) ---
-    const H = 2.6; const wallM = (len: number) => mat({ map: load(wallUrl, [len / H, 1]) });
-    s.add(box(0.25, H, GRID.d, wallM(GRID.d), -0.125, H / 2, GRID.d / 2));   // left wall
-    s.add(box(4, H, 0.25, wallM(4), 2, H / 2, -0.125));                     // back wall, left of entrance
-    s.add(box(4, H, 0.25, wallM(4), 10, H / 2, -0.125));                    // back wall, right of entrance
-    s.add(box(4, 0.5, 0.25, mat({ color: '#b9ab8f' }), 6, H - 0.25, -0.125)); // lintel
-    const curb = mat({ color: '#8a7d6c' });
-    s.add(box(GRID.w + 0.25, 0.3, 0.22, curb, GRID.w / 2, 0.15, GRID.d + 0.11)); // near cut walls
-    s.add(box(0.22, 0.3, GRID.d, curb, GRID.w + 0.11, 0.15, GRID.d / 2));
-
-    // old fight posters on the left wall and beside the entrance
-    const posterM = mat({ map: load(postersUrl) });
-    const p1 = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 1.26), posterM); p1.rotation.y = Math.PI / 2; p1.position.set(0.02, 1.55, 3.8); s.add(p1);
-    const p2 = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.12), posterM); p2.position.set(10, 1.55, 0.02); s.add(p2);
-
-    // pillars
-    const pilM = mat({ map: load(wallUrl, [0.2, 1]) }); const pil = mat({ color: '#4a4038' });
-    PILLARS.forEach(([x, z]) => s.add(box(0.5, H, 0.5, pilM, x + 0.5, H / 2, z + 0.5)));
-
-    // gutter + leak
-    s.add(box(0.5, 0.03, 2, mat({ color: '#1c2a30', roughness: 0.15, metalness: 0.5 }), 0.45, 0.02, 7));
-    this.drip = box(0.06, 0.25, 0.06, new THREE.MeshBasicMaterial({ color: '#bfe3f2' }), 0.5, 2.6, 6.6); s.add(this.drip);
-
-    // fluorescent tube
-    this.tubeMesh = box(1.6, 0.06, 0.08, new THREE.MeshBasicMaterial({ color: '#3a3833' }), 6, 2.55, 3.5); s.add(this.tubeMesh);
-    s.add(box(0.03, 0.5, 0.03, pil, 5.3, 2.8, 3.5), box(0.03, 0.5, 0.03, pil, 6.7, 2.8, 3.5));
-
-    // roll-up shutter
-    const g = new THREE.BoxGeometry(4, 2.1, 0.08); g.translate(0, -1.05, 0); // pivot at the top
-    this.shutter = new THREE.Mesh(g, mat({ map: load(shutterUrl, [1.6, 1]), metalness: 0.35, roughness: 0.6 }));
-    this.shutter.position.set(6, 2.1, -0.1); s.add(this.shutter);
-
-    // --- neighbourhood (decor only, not simulation entities) ---
-    const r = rng(42);
-    const win = new THREE.MeshBasicMaterial({ color: '#ffc25e' }); const winC = new THREE.MeshBasicMaterial({ color: '#ffe2a6' });
-    const addHouse = (x: number, z: number, w: number, d: number, h: number, tint: string) => {
-      s.add(box(w, h, d, mat({ map: load(wallUrl, [w / 3, 1]), color: tint }), x, h / 2, z));
-      const roof = box(w + 0.5, 0.14, d + 0.5, mat({ map: load(roofUrl, [w / 3, d / 3]), metalness: 0.3, roughness: 0.6 }), x, h + 0.07, z); s.add(roof);
-      for (let i = 0; i < 3; i++) if (r() > 0.25) {
-        s.add(box(0.5, 0.55, 0.05, r() > 0.5 ? win : winC, x - w / 2 + 0.8 + i * (w - 1.6) / 2, h * 0.58, z + d / 2 + 0.03));
-        s.add(box(0.05, 0.55, 0.5, r() > 0.5 ? win : winC, x + w / 2 + 0.03, h * 0.58, z - d / 2 + 0.8 + i * (d - 1.6) / 2));
-      }
-    };
-    addHouse(-4.2, 3, 5, 6, 3.2, '#9c8f84'); addHouse(-4.5, -6.5, 6, 5, 4.4, '#8f857c'); addHouse(3, -8.5, 6, 4.5, 3.6, '#9a9088');
-    addHouse(10.5, -8.2, 6.5, 4, 5, '#8c8178'); addHouse(-5, 10.5, 6, 5, 3, '#958a80'); addHouse(17.5, -3, 5, 7, 4, '#90857c');
-    addHouse(17.8, 6.5, 5, 6, 3.2, '#998e84'); addHouse(4, 14, 7, 5, 3.4, '#8f857c'); addHouse(13, 13.5, 6, 5, 3, '#958a80');
-    s.add(box(0.08, 1.4, 0.5, new THREE.MeshBasicMaterial({ color: '#ff4f86' }), -1.65, 2.3, 3)); // neon sign
-    // power pole + lines
-    s.add(box(0.18, 5.4, 0.18, pil, 1.2, 2.7, -3.6), box(1.4, 0.1, 0.1, pil, 1.2, 5, -3.6));
-    const lm = new THREE.LineBasicMaterial({ color: '#15191c' });
-    [[-0.5, 0], [0, 0.3], [0.5, -0.2]].forEach(([o, sag]) => {
-      const pts = []; for (let i = 0; i <= 12; i++) { const k = i / 12; pts.push(new THREE.Vector3(1.2 + o + k * 17, 5 - Math.sin(k * Math.PI) * (0.9 + sag), -3.6 + k * 0.6)); }
-      s.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lm));
-    });
-    s.add(box(0.1, 3.2, 0.1, pil, 6, 1.6, -2.9), box(0.35, 0.12, 0.35, win, 6, 3.2, -2.75)); // street lamp
-    // generated prop sprites
-    s.add(sprite(cartUrl, 2.3, 9.9, -2.3), sprite(plantsUrl, 1.5, 12.9, 2.2), sprite(plantsUrl, 1.3, -0.9, -1.3), sprite(plantsUrl, 1.2, 2.6, 9.1), sprite(scooterUrl, 1.15, 13.3, 6.4));
-
-    // --- placement ghost ---
-    this.ghost = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#f0e5cd', transparent: true, opacity: 0.55, depthTest: false }));
-    this.ghost.rotation.x = -Math.PI / 2; this.ghost.visible = false; this.ghost.renderOrder = 5; s.add(this.ghost);
-    s.add(this.facilityGroup);
-
-    // --- rain ---
-    const n = this.reduced ? 0 : 320; const pos = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { pos[i * 3] = -8 + r() * 30; pos[i * 3 + 1] = r() * 12; pos[i * 3 + 2] = -12 + r() * 28; }
+    const bg = new THREE.Mesh(new THREE.PlaneGeometry(IMG, IMG), new THREE.MeshBasicMaterial({ map: this.backdrop, ...FLAT })); bg.position.set(IMG / 2, -IMG / 2, 0); bg.renderOrder = 0; s.add(bg);
+    this.facilityGroup.renderOrder = 1; s.add(this.facilityGroup);
+    // things that stand in front of people
+    for (const [x0, y0, x1, y1] of PILLARS) s.add(cutout([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], this.backdrop, y1));
+    s.add(cutout(FRONT_WALL, this.backdrop, 5000));
+    // roll-up shutter hanging in the entrance (closed until the player lifts it)
+    const st = load(shutterUrl); st.wrapS = st.wrapT = THREE.RepeatWrapping;
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(new Array(12).fill(0), 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 2.5, 1, 2.5, 0, 0, 0], 2)); g.setIndex([0, 3, 1, 1, 3, 2]);
+    this.shutter = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: st, color: '#b7a89a', ...FLAT })); this.shutter.renderOrder = 640; s.add(this.shutter); this.layoutShutter();
+    // warm flicker around the fluorescent tube
+    const gc = document.createElement('canvas'); gc.width = gc.height = 64; const c = gc.getContext('2d')!; const gr = c.createRadialGradient(32, 32, 2, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,214,150,.9)'); gr.addColorStop(1, 'rgba(255,214,150,0)'); c.fillStyle = gr; c.fillRect(0, 0, 64, 64);
+    this.glow = new THREE.Mesh(new THREE.PlaneGeometry(190, 110), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(gc), transparent: true, blending: THREE.AdditiveBlending, depthTest: false }));
+    this.glow.position.copy(P(618, 318)); this.glow.renderOrder = 6000; s.add(this.glow);
+    // darkness while the camp is still locked
+    this.night = new THREE.Mesh(new THREE.PlaneGeometry(IMG * 3, IMG * 3), new THREE.MeshBasicMaterial({ color: '#070a12', transparent: true, opacity: 0.6, depthTest: false }));
+    this.night.position.copy(P(IMG / 2, IMG / 2)); this.night.renderOrder = 7000; s.add(this.night);
+    // rain streaks
+    const n = this.reduced ? 0 : 150, pos = new Float32Array(n * 6);
+    for (let i = 0; i < n; i++) { const x = Math.random() * IMG * 1.3 - 150, y = Math.random() * IMG * 1.3 - 150; pos.set([x, -y, 0, x - 4, -(y + 16), 0], i * 6); }
     const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.rain = new THREE.Points(rg, new THREE.PointsMaterial({ color: '#c9dbe2', size: 1, sizeAttenuation: false, transparent: true, opacity: 0.4 }));
-    s.add(this.rain);
+    this.rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: '#d9e6ea', transparent: true, opacity: 0.22, depthTest: false })); this.rain.renderOrder = 8000; s.add(this.rain);
   }
 
+  private layoutShutter() {
+    const o = OPENING, k = 1 - this.shutterOpen * 0.93, pos = this.shutter.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const bl = [o.tl[0] + (o.bl[0] - o.tl[0]) * k, o.tl[1] + (o.bl[1] - o.tl[1]) * k], br = [o.tr[0] + (o.br[0] - o.tr[0]) * k, o.tr[1] + (o.br[1] - o.tr[1]) * k];
+    pos.setXYZ(0, o.tl[0], -o.tl[1], 0); pos.setXYZ(1, o.tr[0], -o.tr[1], 0); pos.setXYZ(2, br[0], -br[1], 0); pos.setXYZ(3, bl[0], -bl[1], 0); pos.needsUpdate = true;
+    const uv = this.shutter.geometry.getAttribute('uv') as THREE.BufferAttribute; uv.setY(2, 1 - k); uv.setY(3, 1 - k); uv.needsUpdate = true;
+    this.shutter.geometry.computeBoundingSphere();
+  }
+
+  /** Fits the plot into the part of the screen the drawer leaves free. */
   resize() {
-    const w = Math.max(1, this.canvas.clientWidth), h = Math.max(1, this.canvas.clientHeight);
-    this.renderer.setSize(Math.ceil(w / PIXEL), Math.ceil(h / PIXEL), false);
-    const aspect = w / h; const viewH = Math.max(15.5 / aspect, 12.5);
-    this.cam.left = -viewH * aspect / 2; this.cam.right = viewH * aspect / 2; this.cam.top = viewH / 2; this.cam.bottom = -viewH / 2;
-    const el = THREE.MathUtils.degToRad(52), az = THREE.MathUtils.degToRad(45), dist = 40;
-    this.cam.position.set(this.target.x + dist * Math.cos(el) * Math.sin(az), dist * Math.sin(el), this.target.z + dist * Math.cos(el) * Math.cos(az));
-    this.cam.lookAt(this.target); this.cam.updateProjectionMatrix();
+    const w = Math.max(1, this.canvas.clientWidth), h = Math.max(1, this.canvas.clientHeight); this.renderer.setSize(w, h, false);
+    const landscape = w > h && h < 520;
+    let u = landscape ? Math.max(560 / (w * 0.6), 330 / h) : Math.max(480 / w, 330 / (h * 0.42));
+    if (!landscape) u = Math.min(u, IMG / w, IMG / h); this.unitsPerPx = u;   // never show past the edge of the painting
+    const vw = w * u, vh = h * u;
+    const cx = FLOOR_CENTRE[0] + (landscape ? 0.18 * vw : 0), cy = FLOOR_CENTRE[1] + (landscape ? 0 : 0.2 * vh);
+    const clamp = (v: number, size: number) => (size <= IMG ? Math.max(0, Math.min(IMG - size, v)) : v);
+    this.view = { x: landscape ? Math.max(0, cx - vw / 2) : clamp(cx - vw / 2, vw), y: clamp(cy - vh / 2, vh) };
+    this.cam.left = this.view.x; this.cam.right = this.view.x + vw; this.cam.top = -this.view.y; this.cam.bottom = -(this.view.y + vh); this.cam.updateProjectionMatrix();
   }
 
   /** Grid cell under a screen point, or null when outside the floor. */
   pickCell(clientX: number, clientY: number): { x: number; z: number } | null {
     const b = this.canvas.getBoundingClientRect();
-    const ndc = new THREE.Vector2(((clientX - b.left) / b.width) * 2 - 1, -((clientY - b.top) / b.height) * 2 + 1);
-    this.ray.setFromCamera(ndc, this.cam);
-    const hit = new THREE.Vector3(); if (!this.ray.ray.intersectPlane(this.plane, hit)) return null;
-    if (hit.x < 0 || hit.z < 0 || hit.x >= GRID.w || hit.z >= GRID.d) return null;
-    return { x: Math.floor(hit.x), z: Math.floor(hit.z) };
+    const [gx, gz] = toGrid(this.view.x + (clientX - b.left) * this.unitsPerPx, this.view.y + (clientY - b.top) * this.unitsPerPx);
+    if (gx < 0 || gz < 0 || gx >= GRID.w || gz >= GRID.d) return null;
+    return { x: Math.floor(gx), z: Math.floor(gz) };
   }
 
-  setGate(open: boolean, instant = false) {
-    this.shutterGoal = open ? 1 : 0; if (instant) this.shutterOpen = this.shutterGoal;
-  }
-  /** People in the camp, straight from simulation data: one sprite per entity. Newcomers walk in through the gate. */
-  setActors(list: ActorSpec[], instant = false) {
-    for (const [id, a] of this.actors) if (!list.some(l => l.id === id)) { this.scene.remove(a.sp); this.actors.delete(id); }
-    for (const l of list) {
-      let a = this.actors.get(l.id);
-      if (!a) {
-        const start = instant ? (l.away ? OUTSIDE : l) : OUTSIDE;
-        const sp = sprite(SPRITES[l.id], 1.45, start.x, start.z); this.scene.add(sp);
-        a = { sp, gx: l.x, gz: l.z, away: false, busy: false, phase: this.actors.size * 1.7 }; this.actors.set(l.id, a);
-      }
-      a.away = !!l.away; a.busy = !!l.busy; a.gx = a.away ? OUTSIDE.x : l.x; a.gz = a.away ? OUTSIDE.z - 1.2 : l.z;
-      if (instant) { a.sp.position.x = a.gx; a.sp.position.z = a.gz; }
-    }
-  }
+  setGate(open: boolean, instant = false) { this.shutterGoal = open ? 1 : 0; if (instant) { this.shutterOpen = this.shutterGoal; this.layoutShutter(); } }
+
   setGhost(g: { x: number; z: number; w: number; d: number; valid: boolean } | null) {
-    this.ghost.visible = !!g; if (!g) return;
-    this.ghost.scale.set(g.w, g.d, 1); this.ghost.position.set(g.x + g.w / 2, 0.03, g.z + g.d / 2);
-    (this.ghost.material as THREE.MeshBasicMaterial).color.set(g.valid ? '#f0e5cd' : '#b64f38');
+    if (this.ghost) { this.scene.remove(this.ghost); this.ghost.geometry.dispose(); this.ghost = null; }
+    if (!g) return;
+    this.ghostMat.color.set(g.valid ? '#f0e5cd' : '#d0553c');
+    this.ghost = floorPatch(g.x, g.z, g.w, g.d, this.ghostMat); this.ghost.renderOrder = 2; this.scene.add(this.ghost);
   }
+
   /** Rebuilds facilities from data so a loaded save shows the same camp. */
   setFacilities(list: Facility[], animateNew = false) {
-    for (const [id, grp] of this.built) if (!list.some(f => f.id === id)) { this.facilityGroup.remove(grp); this.built.delete(id); }
+    for (const [id, m] of this.built) if (!list.some(f => f.id === id)) { this.facilityGroup.remove(m); this.built.delete(id); }
     for (const f of list) {
       if (this.built.has(f.id)) continue;
-      const grp = new THREE.Group();
-      for (let i = 0; i < f.w * 2; i++) for (let j = 0; j < f.d * 2; j++) {
-        const m = mat({ color: (i + j) % 2 ? '#2f5f8f' : '#a8392e', roughness: 0.8 });
-        grp.add(box(0.48, 0.07, 0.48, m, f.x + 0.25 + i * 0.5, 0.035, f.z + 0.25 + j * 0.5));
-      }
-      grp.userData.t = animateNew && !this.reduced ? 0 : 1;
-      this.facilityGroup.add(grp); this.built.set(f.id, grp);
+      const mat = new THREE.MeshBasicMaterial({ map: this.matTex, ...FLAT, color: '#d8c7b4', opacity: animateNew && !this.reduced ? 0 : 1 });
+      const m = floorPatch(f.x, f.z, f.w, f.d, mat); m.renderOrder = 1; this.facilityGroup.add(m); this.built.set(f.id, m);
     }
+  }
+
+  /** People in the camp, straight from simulation data: one sprite per entity. Newcomers walk in from the street. */
+  setActors(list: ActorSpec[], instant = false) {
+    for (const [id, a] of this.actors) if (!list.some(l => l.id === id)) { this.scene.remove(a.mesh, a.shadow); this.actors.delete(id); }
+    for (const l of list) {
+      const target: [number, number] = l.outside ? DOORSTEP : toPx(l.x, l.z); const wantInside = !l.outside && !l.away;
+      let a = this.actors.get(l.id);
+      if (!a) {
+        const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0, 0.5, 0);
+        const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ ...FLAT, alphaTest: 0.25, side: THREE.DoubleSide, color: '#f1e3d2' }));
+        const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 20), new THREE.MeshBasicMaterial({ color: '#000', ...FLAT, opacity: 0.32 })); shadow.scale.set(15, 6, 1);
+        const start: [number, number] = instant ? (l.away ? ROUTE_IN[0] : target) : ROUTE_IN[0];
+        a = { id: l.id, mesh, shadow, pos: [...start], path: [], inside: instant && wantInside, away: false, work: false, tex: new Map(), key: '', phase: this.actors.size * 0.37, flip: false };
+        this.actors.set(l.id, a); this.scene.add(mesh, shadow);
+      }
+      a.away = !!l.away; a.work = !!l.work;
+      const dest: [number, number] = a.away ? ROUTE_IN[0] : target;
+      // Walk through the entrance, never through a wall.
+      if (instant) { a.pos = [...dest]; a.path = []; a.inside = wantInside; }
+      else if (a.inside && !wantInside) a.path = [ROUTE_IN[2], ROUTE_IN[1], dest];
+      else if (!a.inside && wantInside) a.path = [ROUTE_IN[1], ROUTE_IN[2], dest];
+      else a.path = [dest];
+      a.inside = wantInside;
+    }
+  }
+
+  private show(a: Actor, key: string, time: number) {
+    const sheet: Sheet | undefined = SHEETS[key];
+    if (a.key !== key) {
+      a.key = key; let t = a.tex.get(key);
+      if (!t) { t = load(sheet ? sheet.url : SPRITES[a.id]); if (sheet) t.repeat.x = 1 / sheet.frames; a.tex.set(key, t); }
+      (a.mesh.material as THREE.MeshBasicMaterial).map = t; (a.mesh.material as THREE.MeshBasicMaterial).needsUpdate = true;
+    }
+    const t = a.tex.get(key)!; let h = PERSON, w = PERSON * 0.45;
+    if (sheet) { t.offset.x = (Math.floor((time + a.phase) * 9) % sheet.frames) / sheet.frames; h = PERSON * sheet.h / 150; w = h * sheet.w / sheet.h; }
+    else if (t.image) { const im = t.image as HTMLImageElement; if (im.width) w = h * im.width / im.height; }
+    const faceLeft = !sheet || sheet.face === 'L';
+    a.mesh.scale.set((a.flip === faceLeft ? -1 : 1) * w, h, 1); // flip = "should look to the right"
   }
 
   private frame() {
     const dt = Math.min(this.clock.getDelta(), 0.05), time = this.clock.elapsedTime;
-    this.shutterOpen += (this.shutterGoal - this.shutterOpen) * Math.min(1, dt * (this.reduced ? 60 : 1.8));
-    this.shutter.scale.y = 1 - this.shutterOpen * 0.86;
-    const lit = this.shutterOpen > 0.5 ? (Math.sin(time * 23) > -0.96 || this.reduced ? 1 : 0.35) : 0;
-    this.tube.intensity = 24 * lit; (this.tubeMesh.material as THREE.MeshBasicMaterial).color.set(lit > 0.5 ? '#fff1cf' : '#3a3833');
+    if (Math.abs(this.shutterGoal - this.shutterOpen) > 0.001) { this.shutterOpen += (this.shutterGoal - this.shutterOpen) * Math.min(1, dt * (this.reduced ? 60 : 1.7)); this.layoutShutter(); }
+    const lit = this.shutterOpen > 0.45 ? (this.reduced || Math.sin(time * 31) > -0.97 ? 1 : 0.5) : 0;
+    const nm = this.night.material as THREE.MeshBasicMaterial; nm.opacity += ((1 - lit) * 0.6 - nm.opacity) * Math.min(1, dt * 6);
+    (this.glow.material as THREE.MeshBasicMaterial).opacity = lit * (0.16 + (this.reduced ? 0 : Math.sin(time * 13) * 0.03 + Math.sin(time * 2.1) * 0.03));
+    for (const m of this.built.values()) { const mat = m.material as THREE.MeshBasicMaterial; if (mat.opacity < 1) mat.opacity = Math.min(1, mat.opacity + dt * 1.6); }
     for (const a of this.actors.values()) {
-      const p = a.sp.position;
-      // Walk through the doorway instead of through the wall.
-      const outside = p.z < 0.2, goalOutside = a.gz < 0.2; let tx = a.gx, tz = a.gz;
-      if (outside !== goalOutside) {
-        if (outside) { tx = GATE.x; tz = Math.abs(p.x - GATE.x) > 0.1 ? p.z : GATE.z + 0.1; }
-        else { tx = GATE.x; tz = Math.abs(p.x - GATE.x) > 0.1 || p.z > GATE.z + 0.2 ? GATE.z : -0.5; }
+      let moving = false;
+      if (a.path.length) {
+        const [tx, ty] = a.path[0], dx = tx - a.pos[0], dy = ty - a.pos[1], d = Math.hypot(dx, dy), step = (this.reduced ? 2000 : 62) * dt;
+        if (d <= step) { a.pos = [tx, ty]; a.path.shift(); } else { a.pos[0] += dx / d * step; a.pos[1] += dy / d * step; }
+        if (Math.abs(dx) > 0.5) a.flip = dx > 0; moving = a.path.length > 0 || d > step;
       }
-      const dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz), far = Math.hypot(a.gx - p.x, a.gz - p.z), step = (this.reduced ? 40 : 2.6) * dt;
-      if (d > 0.03) { p.x += dx / d * Math.min(step, d); p.z += dz / d * Math.min(step, d); }
-      const moving = far > 0.06;
-      a.sp.visible = !(a.away && !moving);
-      p.y = moving ? Math.abs(Math.sin(time * 9 + a.phase)) * 0.07 : a.busy && !this.reduced ? Math.abs(Math.sin(time * 6 + a.phase)) * 0.12 : 0;
-      a.sp.material.rotation = a.busy && !moving && !this.reduced ? Math.sin(time * 6 + a.phase) * 0.08 : 0;
+      const hidden = a.away && !moving;
+      a.mesh.visible = a.shadow.visible = !hidden;
+      if (moving) this.show(a, SHEETS[a.id + '_walk'] ? a.id + '_walk' : a.id, time);
+      else if (a.work) {
+        // athletes face the coach on their right; coaches face the athletes
+        const coach = !!SHEETS[a.id + '_work']; a.flip = !coach;
+        const cycle = Math.floor((time + a.phase * 5) / 0.89) % 3;
+        this.show(a, coach ? a.id + '_work' : cycle === 2 || !SHEETS[a.id + '_guard'] ? a.id + '_attack' : a.id + '_guard', time);
+      } else { a.flip = false; this.show(a, a.id, time); }
+      a.mesh.position.copy(P(a.pos[0], a.pos[1])); a.mesh.renderOrder = a.pos[1];
+      a.shadow.position.copy(P(a.pos[0], a.pos[1] - 1)); a.shadow.renderOrder = a.pos[1] - 0.5;
     }
-    this.drip.position.y = 2.6 - ((time * 1.7) % 1) * 2.6;
+    if (this.ghost) this.ghostMat.opacity = 0.42 + Math.sin(time * 5) * 0.14;
     const p = this.rain.geometry.getAttribute('position') as THREE.BufferAttribute;
-    for (let i = 0; i < p.count; i++) { let y = p.getY(i) - dt * 14; if (y < 0) y += 12; p.setY(i, y); }
+    for (let i = 0; i < p.count; i += 2) { let y = p.getY(i) - dt * 520, x = p.getX(i) - dt * 130; if (y < -IMG * 1.15) { y += IMG * 1.3; x += 325; } p.setXY(i, x, y); p.setXY(i + 1, x - 4, y - 16); }
     p.needsUpdate = true;
-    for (const grp of this.built.values()) if (grp.userData.t < 1) {
-      grp.userData.t = Math.min(1, grp.userData.t + dt * 2);
-      grp.children.forEach((c, i) => { const k = THREE.MathUtils.clamp(grp.userData.t * 2.2 - i * 0.045, 0, 1); c.scale.setScalar(k); c.position.y = 0.035 + (1 - k) * 0.6; });
-    }
-    if (this.ghost.visible) (this.ghost.material as THREE.MeshBasicMaterial).opacity = 0.4 + Math.sin(time * 5) * 0.15;
     this.renderer.render(this.scene, this.cam);
   }
 }

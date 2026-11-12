@@ -3,6 +3,7 @@ import { CampScene, SPRITES, type ActorSpec } from './render/scene';
 import * as G from './sim/state';
 import type { GameState, Instruction, School } from './sim/state';
 import { baht, nextLang, num, t } from './i18n';
+import { SHEETS } from './assets/anim';
 import ringUrl from './assets/ring.webp';
 import kaewUrl from './assets/kaew.webp';
 import fahUrl from './assets/fah.webp';
@@ -46,6 +47,14 @@ function bell() { // synthesised ring bell; only ever called from a click
   } catch { /* audio unavailable */ }
 }
 
+/** Plays a sprite sheet on a ring fighter. `right` is the way the fighter must look. */
+function fighterAnim(el: HTMLElement, key: string, right: boolean) {
+  const sh = SHEETS[key]; if (!sh || el.dataset.key === key) return; el.dataset.key = key;
+  el.style.backgroundImage = `url(${sh.url})`; el.style.backgroundSize = `${sh.frames * 100}% 100%`;
+  el.style.height = `${11.5 * sh.h / 150}%`; el.style.aspectRatio = `${sh.w} / ${sh.h}`;
+  el.style.scale = (sh.face === 'L') === right ? '-1 1' : '1 1';
+  el.style.animation = 'none'; void el.offsetWidth; el.style.animation = reduced ? 'none' : `sheet .88s steps(${sh.frames}, jump-none) infinite`;
+}
 function commit(next: GameState) { state = next; G.save(state); render(); }
 const L = () => state.lang;
 const T = (k: string, v: Record<string, string | number> = {}) => t(L(), k, v);
@@ -58,11 +67,11 @@ function actors(): ActorSpec[] {
   const s = state, m = s.facilities[0], list: ActorSpec[] = [];
   const order: G.Step[] = ['intro', 'locations', 'gate', 'walk', 'place', 'coach', 'scout', 'away', 'report', 'roster', 'school', 'morning', 'summary', 'offer', 'camp', 'weighin', 'fight', 'result', 'end'];
   const at = (st: G.Step) => order.indexOf(s.step) >= order.indexOf(st);
-  if (at('walk')) list.push({ id: 'rin', x: 5, z: 1.9, away: s.step === 'away' });
+  if (at('gate')) list.push({ id: 'rin', x: 6.4, z: 6.6, outside: s.step === 'gate', away: s.step === 'away' });
   if (m) {
     const train = s.step === 'summary' || s.step === 'camp';
-    if (coach()) list.push({ id: coach().id, x: Math.min(m.x + 3.5, 11.4), z: m.z + 1, busy: train });
-    s.fighters.forEach((f, i) => list.push({ id: f.id, x: m.x + 0.6 + i * 0.95, z: m.z + 1.2 - (i % 2) * 0.5, busy: train }));
+    if (coach()) list.push({ id: coach().id, x: Math.min(m.x + 3.5, 9.4), z: m.z + 1, work: train });
+    s.fighters.forEach((f, i) => list.push({ id: f.id, x: m.x + 0.6 + i * 0.95, z: m.z + 1.3 - (i % 2) * 0.6, work: train }));
   }
   return list;
 }
@@ -83,7 +92,7 @@ function render() {
   const onStage = ['intro', 'locations', 'weighin', 'fight', 'result'].includes(s.step);
   stage.hidden = !onStage; stage.classList.toggle('dimmed', s.step === 'locations' || s.step === 'result' || s.step === 'weighin');
   const showF = s.step === 'fight' || s.step === 'result'; $('app').classList.toggle('fighting', showF); $('fA').hidden = $('fB').hidden = !showF;
-  if (showF && s.fight) { ($('fA') as HTMLImageElement).src = ALL_SPRITES[s.fight.fighterId]; ($('fB') as HTMLImageElement).src = ALL_SPRITES[s.fight.opponentId]; }
+  if (showF && s.fight && !busy) { fighterAnim($('fA'), s.fight.fighterId + '_guard', true); fighterAnim($('fB'), s.fight.opponentId + '_guard', false); }
   if (!busy) { stage.classList.toggle('idle', showF); stage.classList.remove('clash'); }
 
   switch (s.step) {
@@ -150,7 +159,7 @@ function render() {
     case 'summary': {
       speaker = coach().id; line = T('summary');
       body.append(h('div', { cls: 'cards' }, ...s.lastSession.map(l => { const f = s.fighters.find(f => f.id === l.fighterId)!;
-        return h('div', { cls: 'card' }, title(G.nameOf(l.fighterId), l.fighterId), h('p', {}, T('act_' + l.activity)),
+        return h('div', { cls: 'card' }, title(G.nameOf(l.fighterId), l.fighterId), h('p', {}, T(l.activity === 'clinch' && s.lastSession.filter(x => x.activity === 'clinch').length < 2 ? 'act_clinch1' : 'act_' + l.activity)),
           h('p', { cls: 'ok' }, Object.entries(l.gains).filter(([, v]) => v).map(([k, v]) => `+${v} ${T('g_' + k)}`).join(' · ')),
           kv([[T('fatigue'), `${f.fatigue}/100` + (f.fatigue >= 70 ? ` · ${T('rest')}` : ''), f.fatigue >= 70 ? 'red' : '']])); })));
       btn(T('summaryBtn'), () => commit(G.seeOffer(s))); break;
@@ -250,7 +259,8 @@ function renderFight(body: HTMLElement, btn: (label: string, fn: () => void, cls
       h('p', { cls: 'small' }, T('betNote')));
   }
   btn(T('gong', { n: n + 1 }), () => {
-    bell(); busy = true; stage.classList.remove('idle'); stage.classList.add('clash'); document.querySelectorAll<HTMLButtonElement>('#drawer button').forEach(b => (b.disabled = true));
+    bell(); busy = true; stage.classList.remove('idle'); stage.classList.add('clash');
+    fighterAnim($('fA'), state.fight!.fighterId + '_attack', true); setTimeout(() => fighterAnim($('fB'), state.fight!.opponentId + '_attack', false), 440); document.querySelectorAll<HTMLButtonElement>('#drawer button').forEach(b => (b.disabled = true));
     setTimeout(() => { busy = false; commit(G.simulateRound(state)); }, reduced ? 0 : 1900);
   });
   btn(T('delegate'), () => commit(G.delegateRest(state)), 'ghost');
