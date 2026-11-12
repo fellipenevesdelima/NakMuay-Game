@@ -15,19 +15,17 @@
   <div class="blur top"></div><div class="blur bottom"></div><div class="vignette"></div>
   <header id="hud">
     <div class="row">
-      <span class="chip" id="day"></span>
-      <span class="chip cash" id="cash"></span>
-      <span class="chip debt" id="debt"></span>
-      <span class="chip" id="payroll" hidden></span>
+      <button class="stat time" id="sTime" data-k="time"></button>
+      <button class="stat cash" id="sCash" data-k="cash"></button>
+      <button class="stat fans" id="sFans" data-k="fans"></button>
+      <button class="stat respect" id="sRespect" data-k="respect"></button>
+      <button class="stat mood" id="sMood" data-k="mood"></button>
       <span class="grow"></span>
-      <button class="mini" id="lang" aria-label="Language"></button>
-      <button class="mini" id="reset"></button>
+      <button class="mini" id="menuBtn" aria-label="Menu">☰</button>
     </div>
-    <div class="row meters">
-      <label><span id="lFans"></span><i><b id="mFans"></b></i></label>
-      <label><span id="lRespect"></span><i><b id="mRespect"></b></i></label>
-      <label><span id="lMood"></span><i><b id="mMood"></b></i></label>
-    </div>
+    <p id="hint" hidden></p>
+    <div id="alerts"></div>
+    <div id="menu" hidden><button id="lang"></button><button id="reset"></button><small id="note"></small></div>
   </header>
   <section id="drawer">
     <canvas id="portrait" width="48" height="48" aria-hidden="true"></canvas>
@@ -36,7 +34,6 @@
       <p id="line"></p>
       <div id="body"></div>
       <div class="btns" id="btns"></div>
-      <small id="note"></small>
     </div>
   </section>
 </div>

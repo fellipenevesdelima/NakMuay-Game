@@ -15,7 +15,13 @@ import niranUrl from '../assets/niran.webp';
 import petchUrl from '../assets/petch.webp';
 
 export const SPRITES: Record<string, string> = { rin: rinUrl, somchai: somchaiUrl, daeng: daengUrl, mali: maliUrl, niran: niranUrl, petch: petchUrl };
-export interface ActorSpec { id: string; look?: string; x: number; z: number; away?: boolean; outside?: boolean; work?: boolean; }
+/**
+ * One person in the camp. `x`/`z` is where they stand when not training. Those with `work` are placed by the scene itself:
+ * each coach takes one athlete on the mat at a time, the others shadow-box beside it and take turns.
+ */
+export interface ActorSpec { id: string; look?: string; x: number; z: number; away?: boolean; outside?: boolean; work?: boolean; role?: 'coach' | 'fighter'; lead?: boolean; tempo?: number; }
+const CYCLE = 2.2, STRIKE = 0.4, TURN = 3;   // seconds per pad cycle; share of it that is the strike; cycles before athletes swap
+const NO_STAND: [number, number][] = [[3, 2], [3, 6], [3, 7], [4, 7], [5, 7]];
 
 // ---- calibration, in the painting's 1024x1024 space ---------------------------
 const IMG = 1024;
@@ -57,6 +63,7 @@ function floorPatch(x: number, z: number, w: number, d: number, mat: THREE.Mater
 interface Actor {
   id: string; mesh: THREE.Mesh; shadow: THREE.Mesh; pos: [number, number]; path: [number, number][]; inside: boolean; away: boolean; work: boolean;
   tex: Map<string, THREE.Texture>; key: string; phase: number; flip: boolean;
+  spec: ActorSpec; home: [number, number]; job: { kind: 'pair' | 'solo'; partner?: Actor; clock: number } | null;
 }
 
 export class CampScene {
@@ -69,7 +76,7 @@ export class CampScene {
   private ghost: THREE.Mesh | null = null; private ghostMat = new THREE.MeshBasicMaterial({ color: '#f0e5cd', transparent: true, opacity: 0.5, depthTest: false });
   private rain!: THREE.LineSegments;
   private actors = new Map<string, Actor>();
-  private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Mesh>();
+  private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Mesh>(); private mats: Facility[] = []; private turn = -1;
   private matTex = load(matUrl);
   private clock = new THREE.Clock(); private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   private unitsPerPx = 1; private view = { x: 0, y: 0 };
@@ -85,7 +92,7 @@ export class CampScene {
   private build() {
     const s = this.scene;
     const bg = new THREE.Mesh(new THREE.PlaneGeometry(IMG, IMG), new THREE.MeshBasicMaterial({ map: this.backdrop, ...FLAT })); bg.position.set(IMG / 2, -IMG / 2, 0); bg.renderOrder = 0; s.add(bg);
-    this.facilityGroup.renderOrder = 1; s.add(this.facilityGroup);
+    s.add(this.facilityGroup);   // no group renderOrder: three.js would then draw the mat after every person
     // things that stand in front of people
     for (const [x0, y0, x1, y1] of PILLARS) s.add(cutout([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], this.backdrop, y1));
     s.add(cutout(FRONT_WALL, this.backdrop, 5000));
@@ -149,9 +156,12 @@ export class CampScene {
   /** Rebuilds facilities from data so a loaded save shows the same camp. */
   setFacilities(list: Facility[], animateNew = false) {
     for (const [id, m] of this.built) if (!list.some(f => f.id === id)) { this.facilityGroup.remove(m); this.built.delete(id); }
+    this.mats = list.filter(f => f.type === 'mat');
     for (const f of list) {
       if (this.built.has(f.id)) continue;
-      const mat = new THREE.MeshBasicMaterial({ map: this.matTex, ...FLAT, color: '#d8c7b4', opacity: animateNew && !this.reduced ? 0 : 1 });
+      // a thin contact shadow so the mat sits on the cement instead of hovering over it
+      const sh = floorPatch(f.x - 0.06, f.z - 0.02, f.w + 0.16, f.d + 0.14, new THREE.MeshBasicMaterial({ color: '#000', ...FLAT, opacity: 0.42 })); sh.renderOrder = 0.5; this.facilityGroup.add(sh);
+      const mat = new THREE.MeshBasicMaterial({ map: this.matTex, ...FLAT, color: '#b5a595', opacity: animateNew && !this.reduced ? 0 : 1 });
       const m = floorPatch(f.x, f.z, f.w, f.d, mat); m.renderOrder = 1; this.facilityGroup.add(m); this.built.set(f.id, m);
     }
   }
@@ -160,28 +170,58 @@ export class CampScene {
   setActors(list: ActorSpec[], instant = false) {
     for (const [id, a] of this.actors) if (!list.some(l => l.id === id)) { this.scene.remove(a.mesh, a.shadow); this.actors.delete(id); }
     for (const l of list) {
-      const target: [number, number] = l.outside ? DOORSTEP : toPx(l.x, l.z); const wantInside = !l.outside && !l.away;
+      const home: [number, number] = l.outside ? DOORSTEP : toPx(l.x, l.z);
       let a = this.actors.get(l.id);
       if (!a) {
         const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0, 0.5, 0);
         const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ ...FLAT, alphaTest: 0.25, side: THREE.DoubleSide, color: '#f1e3d2' }));
         const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 20), new THREE.MeshBasicMaterial({ color: '#000', ...FLAT, opacity: 0.32 })); shadow.scale.set(15, 6, 1);
-        const start: [number, number] = instant ? (l.away ? ROUTE_IN[0] : target) : ROUTE_IN[0];
-        a = { id: l.look ?? l.id, mesh, shadow, pos: [...start], path: [], inside: instant && wantInside, away: false, work: false, tex: new Map(), key: '', phase: this.actors.size * 0.37, flip: false };
+        const start: [number, number] = instant && !l.away ? home : ROUTE_IN[0];
+        a = { id: l.look ?? l.id, mesh, shadow, pos: [...start], path: [], inside: instant && !l.outside && !l.away, away: false, work: false, tex: new Map(), key: '', phase: this.actors.size * 0.37, flip: false, spec: l, home, job: null };
         this.actors.set(l.id, a); this.scene.add(mesh, shadow);
       }
-      a.away = !!l.away; a.work = !!l.work;
-      const dest: [number, number] = a.away ? ROUTE_IN[0] : target;
-      // Walk through the entrance, never through a wall.
-      if (instant) { a.pos = [...dest]; a.path = []; a.inside = wantInside; }
-      else if (a.inside && !wantInside) a.path = [ROUTE_IN[2], ROUTE_IN[1], dest];
-      else if (!a.inside && wantInside) a.path = [ROUTE_IN[1], ROUTE_IN[2], dest];
-      else a.path = [dest];
-      a.inside = wantInside;
+      a.spec = l; a.home = home; a.away = !!l.away; a.work = !!l.work;
     }
+    this.turn = -1; this.assign(instant);
   }
 
-  private show(a: Actor, key: string, time: number) {
+  /** Sends an actor somewhere, through the entrance and never through a wall. */
+  private go(a: Actor, dest: [number, number], wantInside: boolean, instant: boolean) {
+    const last = a.path.length ? a.path[a.path.length - 1] : a.pos; if (Math.hypot(last[0] - dest[0], last[1] - dest[1]) < 1 && a.inside === wantInside) return;
+    if (instant) { a.pos = [...dest]; a.path = []; }
+    else if (a.inside && !wantInside) a.path = [ROUTE_IN[2], ROUTE_IN[1], dest];
+    else if (!a.inside && wantInside) a.path = [ROUTE_IN[1], ROUTE_IN[2], dest];
+    else a.path = [dest];
+    a.inside = wantInside;
+  }
+
+  /**
+   * Training choreography. Each working coach holds pads for one athlete on the mat; the rest shadow-box beside it and
+   * rotate in every few cycles. An athlete in fight camp (`lead`) keeps the pads.
+   */
+  private assign(instant = false) {
+    const all = [...this.actors.values()], mat = this.mats[0];
+    const coaches = all.filter(a => a.spec.role === 'coach' && a.spec.work && !a.away), fighters = all.filter(a => a.spec.role === 'fighter' && a.spec.work && !a.away);
+    for (const a of all) a.job = null;
+    if (mat && fighters.length) {
+      const lead = fighters.filter(f => f.spec.lead), free = fighters.filter(f => !f.spec.lead), k = free.length ? Math.max(0, this.turn) % free.length : 0;
+      const order = [...lead, ...free.slice(k), ...free.slice(0, k)];
+      const solo = ([[mat.x - 0.7, mat.z + 0.5], [mat.x - 0.7, mat.z + 1.5], [mat.x + 0.7, mat.z + mat.d + 0.6], [mat.x + 2.1, mat.z + mat.d + 0.6], [mat.x + mat.w + 0.7, mat.z + 1.4], [mat.x + 1.5, mat.z - 0.6]] as [number, number][])
+        .map(([x, z]) => [Math.max(0.4, Math.min(GRID.w - 0.4, x)), Math.max(0.4, Math.min(GRID.d - 1.4, z))] as [number, number])
+        .filter(([x, z]) => !NO_STAND.some(([bx, bz]) => Math.floor(x) === bx && Math.floor(z) === bz));
+      order.forEach((f, i) => {
+        const c = coaches[i];
+        if (c) {
+          const z = mat.z + (coaches.length > 1 ? 0.55 + i * 0.9 : mat.d / 2 + 0.1), tempo = c.spec.tempo ?? 1;
+          f.job = { kind: 'pair', partner: c, clock: tempo }; c.job = { kind: 'pair', partner: f, clock: tempo };
+          this.go(f, toPx(mat.x + mat.w / 2 - 0.5, z), true, instant); this.go(c, toPx(mat.x + mat.w / 2 + 0.5, z), true, instant);
+        } else { f.job = { kind: 'solo', clock: 1 }; const [x, z] = solo[(i - coaches.length) % solo.length]; this.go(f, toPx(x, z), true, instant); }
+      });
+    }
+    for (const a of all) if (!a.job) this.go(a, a.away ? ROUTE_IN[0] : a.home, !a.away && !a.spec.outside, instant);
+  }
+
+  private show(a: Actor, key: string, frame: number) {
     const sheet: Sheet | undefined = SHEETS[key];
     if (a.key !== key) {
       a.key = key; let t = a.tex.get(key);
@@ -189,7 +229,7 @@ export class CampScene {
       (a.mesh.material as THREE.MeshBasicMaterial).map = t; (a.mesh.material as THREE.MeshBasicMaterial).needsUpdate = true;
     }
     const t = a.tex.get(key)!; let h = PERSON, w = PERSON * 0.45;
-    if (sheet) { t.offset.x = (Math.floor((time + a.phase) * 9) % sheet.frames) / sheet.frames; h = PERSON * sheet.h / 150; w = h * sheet.w / sheet.h; }
+    if (sheet) { t.offset.x = (((Math.floor(frame) % sheet.frames) + sheet.frames) % sheet.frames) / sheet.frames; h = PERSON * sheet.h / 150; w = h * sheet.w / sheet.h; }
     else if (t.image) { const im = t.image as HTMLImageElement; if (im.width) w = h * im.width / im.height; }
     const faceLeft = !sheet || sheet.face === 'L';
     a.mesh.scale.set((a.flip === faceLeft ? -1 : 1) * w, h, 1); // flip = "should look to the right"
@@ -202,6 +242,7 @@ export class CampScene {
     const nm = this.night.material as THREE.MeshBasicMaterial; nm.opacity += ((1 - lit) * 0.6 - nm.opacity) * Math.min(1, dt * 6);
     (this.glow.material as THREE.MeshBasicMaterial).opacity = lit * (0.16 + (this.reduced ? 0 : Math.sin(time * 13) * 0.03 + Math.sin(time * 2.1) * 0.03));
     for (const m of this.built.values()) { const mat = m.material as THREE.MeshBasicMaterial; if (mat.opacity < 1) mat.opacity = Math.min(1, mat.opacity + dt * 1.6); }
+    const turn = Math.floor(time / (CYCLE * TURN)); if (turn !== this.turn) { this.turn = turn; this.assign(); }
     for (const a of this.actors.values()) {
       let moving = false;
       if (a.path.length) {
@@ -211,13 +252,20 @@ export class CampScene {
       }
       const hidden = a.away && !moving;
       a.mesh.visible = a.shadow.visible = !hidden;
-      if (moving) this.show(a, SHEETS[a.id + '_walk'] ? a.id + '_walk' : a.id, time);
-      else if (a.work) {
-        // athletes face the coach on their right; coaches face the athletes
-        const coach = !!SHEETS[a.id + '_work']; a.flip = !coach;
-        const cycle = Math.floor((time + a.phase * 5) / 0.89) % 3;
-        this.show(a, coach ? a.id + '_work' : cycle === 2 || !SHEETS[a.id + '_guard'] ? a.id + '_attack' : a.id + '_guard', time);
-      } else { a.flip = false; this.show(a, a.id, time); }
+      const job = a.job, partner = job?.partner, ready = !!partner && !partner.path.length && !a.path.length;
+      if (moving) this.show(a, SHEETS[a.id + '_walk'] ? a.id + '_walk' : a.id, (time + a.phase) * 9);
+      else if (job?.kind === 'pair' && partner && ready) {
+        // one clock for the two of them: the strike and the pad land on the same frame, then both reset
+        a.flip = partner.pos[0] > a.pos[0];
+        const p = ((time * job.clock) % CYCLE) / CYCLE, hit = p < STRIKE, f = hit ? p / STRIKE * 8 : 0;
+        if (a.spec.role === 'coach') this.show(a, SHEETS[a.id + '_work'] ? a.id + '_work' : a.id, f);
+        else this.show(a, hit && SHEETS[a.id + '_attack'] ? a.id + '_attack' : SHEETS[a.id + '_guard'] ? a.id + '_guard' : a.id, hit ? f : time * 7);
+      } else if (job?.kind === 'solo') {
+        // shadow-boxing alone, each in their own time, turned towards the pads
+        const mat = this.mats[0]; if (mat) a.flip = toPx(mat.x + mat.w / 2, mat.z + mat.d / 2)[0] > a.pos[0];
+        const p = ((time + a.phase * 4) % (CYCLE * 1.6)) / (CYCLE * 1.6), hit = p < 0.25 && !!SHEETS[a.id + '_attack'];
+        this.show(a, hit ? a.id + '_attack' : SHEETS[a.id + '_guard'] ? a.id + '_guard' : a.id, hit ? p / 0.25 * 8 : (time + a.phase) * 6);
+      } else { a.flip = false; this.show(a, a.id, 0); }
       a.mesh.position.copy(P(a.pos[0], a.pos[1])); a.mesh.renderOrder = a.pos[1];
       a.shadow.position.copy(P(a.pos[0], a.pos[1] - 1)); a.shadow.renderOrder = a.pos[1] - 0.5;
     }

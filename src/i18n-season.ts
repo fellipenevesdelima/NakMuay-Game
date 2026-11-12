@@ -1,6 +1,10 @@
 // Strings for the season hub. Thai is AI-drafted and NOT yet reviewed by a native speaker.
 type Dict = Record<string, string>;
 export const ptSeason: Dict = {
+  hudTime: 'T{s} · Sem {w}', langBtn: 'Idioma: {l}', resetSure: 'Apagar a carreira e começar de novo?', st_time: 'Tempo', st_cash: 'Caixa', st_fans: 'Torcida', st_respect: 'Respeito', st_mood: 'Clima',
+  hint_time: 'Temporada e semana. Cada decisão de semana avança sete dias.', hint_cash: 'Caixa: paga tudo, inclusive as apostas. O que passar do teto do nível se perde.', hint_fans: 'Torcida: traz turistas e patrocínio. Sobe a cada luta, mais com vitória.', hint_respect: 'Respeito: o peso do nome do camp entre promotores. Sobe com vitórias, cai com derrota e balança perdida.', hint_mood: 'Clima: o humor da equipe. Cai com salário atrasado, derrotas e treinador esgotado.',
+  al_payroll: 'A folha vence nesta semana e faltam {v}.', al_trainer: '{n} está no limite: vai faltar ou ir embora.', al_offer: 'A oferta de luta para {n} expira nesta semana.',
+  secLoad: 'Carga dos treinadores', secBills: 'Contas do mês: {v}', payrollLbl: 'Folha', instLbl: 'Parcela da dívida', dueLbl: 'Vencimento', dayN: 'dia {d}', debtLbl: 'Dívida restante',
   fans: 'Torcida', respect: 'Respeito', mood: 'Clima', debt: 'Dívida {v} · parcela {p}/mês',
   tab_week: 'Semana', tab_coach: 'Treinadores', tab_roster: 'Elenco', tab_rin: 'Manager', tab_offers: 'Lutas', tab_camp: 'Academia',
   hubIntro: 'A primeira luta ficou para trás. Daqui em diante é semana a semana: quem treina, quem luta, quem paga a conta.',
@@ -38,6 +42,10 @@ export const ptSeason: Dict = {
   lifeAfter: 'Vida útil de {name}', standing: 'Torcida {f} · Respeito {r}',
 };
 export const enSeason: Dict = {
+  hudTime: 'S{s} · Wk {w}', langBtn: 'Language: {l}', resetSure: 'Erase this career and start again?', st_time: 'Time', st_cash: 'Cash', st_fans: 'Fans', st_respect: 'Respect', st_mood: 'Mood',
+  hint_time: 'Season and week. Each week decision moves seven days.', hint_cash: 'Cash: pays for everything, bets included. Anything above the level ceiling is lost.', hint_fans: 'Fans: bring tourists and sponsors. Grows with every fight, more with a win.', hint_respect: 'Respect: the weight of the camp name among promoters. Grows with wins, falls with losses and missed weight.', hint_mood: 'Mood: how the team feels. Falls with late wages, losses and a worn-out trainer.',
+  al_payroll: 'Payroll is due this week and you are {v} short.', al_trainer: '{n} is at the limit: he will miss work or leave.', al_offer: 'The fight offer for {n} expires this week.',
+  secLoad: 'Trainer load', secBills: 'Bills this month: {v}', payrollLbl: 'Payroll', instLbl: 'Loan instalment', dueLbl: 'Due', dayN: 'day {d}', debtLbl: 'Debt left',
   fans: 'Fans', respect: 'Respect', mood: 'Mood', debt: 'Debt {v} · {p}/mo instalment',
   tab_week: 'Week', tab_coach: 'Trainers', tab_roster: 'Roster', tab_rin: 'Manager', tab_offers: 'Fights', tab_camp: 'Academy',
   hubIntro: 'The first fight is behind you. From here it goes week by week: who trains, who fights, who pays the bill.',
@@ -75,6 +83,10 @@ export const enSeason: Dict = {
   lifeAfter: 'Career left for {name}', standing: 'Fans {f} · Respect {r}',
 };
 export const thSeason: Dict = {
+  hudTime: 'ฤดู {s} · สัปดาห์ {w}', langBtn: 'ภาษา: {l}', resetSure: 'ลบเส้นทางนี้แล้วเริ่มใหม่?', st_time: 'เวลา', st_cash: 'เงินสด', st_fans: 'แฟนมวย', st_respect: 'บารมี', st_mood: 'บรรยากาศ',
+  hint_time: 'ฤดูกาลและสัปดาห์ ทุกการตัดสินใจเดินหน้าเจ็ดวัน', hint_cash: 'เงินสด: จ่ายทุกอย่างรวมถึงเดิมพัน ส่วนที่เกินเพดานของระดับจะหายไป', hint_fans: 'แฟนมวย: พานักท่องเที่ยวและสปอนเซอร์มา เพิ่มทุกครั้งที่ชก ชนะยิ่งเพิ่ม', hint_respect: 'บารมี: น้ำหนักของชื่อค่ายในสายตาโปรโมเตอร์ เพิ่มเมื่อชนะ ลดเมื่อแพ้หรือชั่งไม่ผ่าน', hint_mood: 'บรรยากาศ: อารมณ์ของทีม ลดเมื่อจ่ายเงินเดือนช้า แพ้ หรือครูมวยหมดแรง',
+  al_payroll: 'เงินเดือนครบกำหนดสัปดาห์นี้และยังขาด {v}', al_trainer: '{n}ถึงขีดจำกัดแล้ว: จะขาดงานหรือลาออก', al_offer: 'ข้อเสนอชกของ{n}หมดอายุสัปดาห์นี้',
+  secLoad: 'ภาระงานครูมวย', secBills: 'ค่าใช้จ่ายเดือนนี้: {v}', payrollLbl: 'เงินเดือน', instLbl: 'ค่างวดหนี้', dueLbl: 'ครบกำหนด', dayN: 'วันที่ {d}', debtLbl: 'หนี้คงเหลือ',
   fans: 'แฟนมวย', respect: 'บารมี', mood: 'บรรยากาศ', debt: 'หนี้ {v} · ผ่อน {p}/เดือน',
   tab_week: 'สัปดาห์', tab_coach: 'ครูมวย', tab_roster: 'นักมวย', tab_rin: 'ผู้จัดการ', tab_offers: 'รายการชก', tab_camp: 'ค่าย',
   hubIntro: 'ไฟต์แรกผ่านไปแล้ว จากนี้เดินทีละสัปดาห์ ใครซ้อม ใครชก ใครจ่ายบิล',
