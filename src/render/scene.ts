@@ -2,24 +2,35 @@
 import * as THREE from 'three';
 import { GRID, PILLARS, type Facility } from '../sim/state';
 
-const PIXEL = 3; // screen pixels per rendered pixel (chunky pixel-art look)
+import floorUrl from '../assets/floor.webp';
+import wallUrl from '../assets/wall.webp';
+import roofUrl from '../assets/roof.webp';
+import alleyUrl from '../assets/alley.webp';
+import shutterUrl from '../assets/shutter.webp';
+import postersUrl from '../assets/posters.webp';
+import rinUrl from '../assets/rin.webp';
+import cartUrl from '../assets/cart.webp';
+import plantsUrl from '../assets/plants.webp';
+import scooterUrl from '../assets/scooter.webp';
 
-function tex(size: number, draw: (c: CanvasRenderingContext2D, s: number) => void, repeat?: [number, number]) {
-  const cv = document.createElement('canvas'); cv.width = cv.height = size;
-  draw(cv.getContext('2d')!, size);
-  const t = new THREE.CanvasTexture(cv);
-  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace;
+const PIXEL = 2; // screen pixels per rendered pixel (chunky pixel-art look)
+
+const loader = new THREE.TextureLoader();
+/** Loads a generated texture (art made for this game; see README). */
+function load(url: string, repeat?: [number, number]) {
+  const t = loader.load(url); t.colorSpace = THREE.SRGBColorSpace;
   if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(...repeat); }
   return t;
 }
-function rng(seed: number) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296); }
-function noise(c: CanvasRenderingContext2D, s: number, base: [number, number, number], amp: number, seed: number) {
-  const r = rng(seed);
-  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
-    const n = (r() - 0.5) * amp;
-    c.fillStyle = `rgb(${base[0] + n | 0},${base[1] + n | 0},${base[2] + n | 0})`; c.fillRect(x, y, 1, 1);
-  }
+/** Upright billboard anchored at its feet; `height` is on-screen height in world units. */
+function sprite(url: string, height: number, x: number, z: number) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, alphaTest: 0.35, color: '#e6d6c4' }));
+  sp.center.set(0.5, 0); sp.position.set(x, 0, z); sp.scale.set(height * 0.6, height, 1);
+  sp.material.map = loader.load(url, t => { const im = t.image as HTMLImageElement; sp.scale.set(height * im.width / im.height, height, 1); });
+  sp.material.map.colorSpace = THREE.SRGBColorSpace;
+  return sp;
 }
+function rng(seed: number) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296); }
 const mat = (o: THREE.MeshStandardMaterialParameters) => new THREE.MeshStandardMaterial({ roughness: 0.9, ...o });
 function box(w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number) {
   const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); return b;
@@ -41,8 +52,8 @@ export class CampScene {
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
     this.renderer.setPixelRatio(1);
-    this.scene.background = new THREE.Color('#0d1418');
-    this.scene.fog = new THREE.Fog('#0d1418', 42, 70);
+    this.scene.background = new THREE.Color('#14100e');
+    this.scene.fog = new THREE.Fog('#14100e', 44, 72);
     this.build();
     this.resize();
     this.renderer.setAnimationLoop(() => this.frame());
@@ -50,50 +61,40 @@ export class CampScene {
 
   private build() {
     const s = this.scene;
-    s.add(new THREE.AmbientLight('#5f7f96', 1.25));
-    const moon = new THREE.DirectionalLight('#8fb4c8', 0.9); moon.position.set(8, 14, 10); s.add(moon);
-    const street = new THREE.PointLight('#ff9a4a', 30, 16, 1.6); street.position.set(6, 3.2, -2.6); s.add(street);
-    const neon = new THREE.PointLight('#ff3f7a', 18, 12, 1.8); neon.position.set(-2.2, 2.2, 3); s.add(neon);
-    this.tube = new THREE.PointLight('#ffd9a0', 0, 18, 1.4); this.tube.position.set(6, 2.6, 3.5); s.add(this.tube);
+    s.add(new THREE.AmbientLight('#9a8c80', 1.7));
+    const dusk = new THREE.DirectionalLight('#ffb070', 0.85); dusk.position.set(10, 12, 6); s.add(dusk);
+    const sky = new THREE.DirectionalLight('#6f93a8', 0.5); sky.position.set(-6, 10, -8); s.add(sky);
+    const lamp = (col: string, power: number, x: number, y: number, z: number, dist = 14) => { const l = new THREE.PointLight(col, power, dist, 1.6); l.position.set(x, y, z); s.add(l); return l; };
+    lamp('#ff9a4a', 40, 6, 3.2, -2.6, 18); lamp('#ffb060', 22, 13.6, 2.6, 4, 12); lamp('#ffa850', 20, -2, 2.4, 9.5, 12); lamp('#ff3f7a', 16, -2.2, 2.2, 3, 10);
+    this.tube = lamp('#ffd9a0', 0, 6, 2.6, 3.5, 20);
 
     // --- ground ---
-    const alleyTex = tex(32, (c, n) => { noise(c, n, [38, 46, 52], 16, 7); c.fillStyle = 'rgba(120,170,190,.18)'; c.fillRect(5, 9, 11, 3); c.fillRect(19, 22, 8, 2); }, [14, 14]);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(56, 56), mat({ map: alleyTex, roughness: 0.35, metalness: 0.25 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(56, 56), mat({ map: load(alleyUrl, [16, 16]), roughness: 0.3, metalness: 0.3 }));
     ground.rotation.x = -Math.PI / 2; ground.position.set(6, -0.02, 4); s.add(ground);
-
-    const floorTex = tex(32, (c, n) => {
-      noise(c, n, [118, 112, 102], 22, 3);
-      c.strokeStyle = 'rgba(40,36,32,.55)'; c.lineWidth = 1; c.strokeRect(0.5, 0.5, n - 1, n - 1);
-      c.strokeStyle = 'rgba(30,26,24,.5)'; c.beginPath(); c.moveTo(6, 4); c.lineTo(12, 13); c.lineTo(10, 21); c.lineTo(17, 29); c.stroke();
-      c.fillStyle = 'rgba(60,52,44,.35)'; c.fillRect(20, 6, 6, 4);
-    }, [GRID.w, GRID.d]);
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(GRID.w, 0.2, GRID.d), mat({ map: floorTex }));
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(GRID.w, 0.2, GRID.d), mat({ map: load(floorUrl, [GRID.w / 4, GRID.d / 4]), roughness: 0.55, metalness: 0.1 }));
     floor.position.set(GRID.w / 2, -0.1, GRID.d / 2); s.add(floor);
 
     // --- walls (far sides full height, near sides cut away) ---
-    const wallTex = tex(32, (c, n) => { noise(c, n, [150, 132, 104], 20, 11); c.fillStyle = 'rgba(40,60,50,.3)'; c.fillRect(0, 24, n, 8); c.fillStyle = 'rgba(30,24,20,.3)'; c.fillRect(9, 0, 2, 20); }, [4, 1]);
-    const wall = mat({ map: wallTex }); const H = 2.6;
-    s.add(box(0.25, H, GRID.d, wall, -0.125, H / 2, GRID.d / 2));           // left wall
-    s.add(box(4, H, 0.25, wall, 2, H / 2, -0.125));                         // back wall, left of entrance
-    s.add(box(4, H, 0.25, wall, 10, H / 2, -0.125));                        // back wall, right of entrance
-    s.add(box(4, 0.5, 0.25, wall, 6, H - 0.25, -0.125));                    // lintel
-    const curb = mat({ color: '#6d665c' });
-    s.add(box(GRID.w + 0.25, 0.28, 0.2, curb, GRID.w / 2, 0.14, GRID.d + 0.1)); // near cut wall
-    s.add(box(0.2, 0.28, GRID.d, curb, GRID.w + 0.1, 0.14, GRID.d / 2));
+    const H = 2.6; const wallM = (len: number) => mat({ map: load(wallUrl, [len / H, 1]) });
+    s.add(box(0.25, H, GRID.d, wallM(GRID.d), -0.125, H / 2, GRID.d / 2));   // left wall
+    s.add(box(4, H, 0.25, wallM(4), 2, H / 2, -0.125));                     // back wall, left of entrance
+    s.add(box(4, H, 0.25, wallM(4), 10, H / 2, -0.125));                    // back wall, right of entrance
+    s.add(box(4, 0.5, 0.25, mat({ color: '#b9ab8f' }), 6, H - 0.25, -0.125)); // lintel
+    const curb = mat({ color: '#8a7d6c' });
+    s.add(box(GRID.w + 0.25, 0.3, 0.22, curb, GRID.w / 2, 0.15, GRID.d + 0.11)); // near cut walls
+    s.add(box(0.22, 0.3, GRID.d, curb, GRID.w + 0.11, 0.15, GRID.d / 2));
 
-    // posters on the left wall
-    const posterTex = tex(16, (c) => { c.fillStyle = '#b8472f'; c.fillRect(0, 0, 16, 16); c.fillStyle = '#e9d7a8'; c.fillRect(2, 2, 12, 3); c.fillStyle = '#2a2320'; c.fillRect(4, 7, 3, 7); c.fillRect(9, 7, 3, 7); });
-    [[2.2, '#ffffff'], [3.6, '#9bb0a0'], [6.1, '#c9b48a']].forEach(([z, tint]) => {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.1), mat({ map: posterTex, color: tint as string }));
-      p.rotation.y = Math.PI / 2; p.position.set(0.02, 1.5, z as number); s.add(p);
-    });
+    // old fight posters on the left wall and beside the entrance
+    const posterM = mat({ map: load(postersUrl) });
+    const p1 = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 1.26), posterM); p1.rotation.y = Math.PI / 2; p1.position.set(0.02, 1.55, 3.8); s.add(p1);
+    const p2 = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.12), posterM); p2.position.set(10, 1.55, 0.02); s.add(p2);
 
     // pillars
-    const pil = mat({ color: '#8d8474' });
-    PILLARS.forEach(([x, z]) => s.add(box(0.5, H, 0.5, pil, x + 0.5, H / 2, z + 0.5)));
+    const pilM = mat({ map: load(wallUrl, [0.2, 1]) }); const pil = mat({ color: '#4a4038' });
+    PILLARS.forEach(([x, z]) => s.add(box(0.5, H, 0.5, pilM, x + 0.5, H / 2, z + 0.5)));
 
     // gutter + leak
-    s.add(box(0.5, 0.03, 2, mat({ color: '#1c2a30', roughness: 0.2, metalness: 0.4 }), 0.45, 0.02, 7));
+    s.add(box(0.5, 0.03, 2, mat({ color: '#1c2a30', roughness: 0.15, metalness: 0.5 }), 0.45, 0.02, 7));
     this.drip = box(0.06, 0.25, 0.06, new THREE.MeshBasicMaterial({ color: '#bfe3f2' }), 0.5, 2.6, 6.6); s.add(this.drip);
 
     // fluorescent tube
@@ -101,61 +102,38 @@ export class CampScene {
     s.add(box(0.03, 0.5, 0.03, pil, 5.3, 2.8, 3.5), box(0.03, 0.5, 0.03, pil, 6.7, 2.8, 3.5));
 
     // roll-up shutter
-    const shTex = tex(16, (c) => { for (let y = 0; y < 16; y++) { c.fillStyle = y % 4 === 0 ? '#3d2f28' : y % 4 === 1 ? '#8a5a3c' : '#7a4a32'; c.fillRect(0, y, 16, 1); } c.fillStyle = 'rgba(190,110,60,.5)'; c.fillRect(3, 5, 2, 6); c.fillRect(11, 2, 1, 9); }, [3, 2]);
     const g = new THREE.BoxGeometry(4, 2.1, 0.08); g.translate(0, -1.05, 0); // pivot at the top
-    this.shutter = new THREE.Mesh(g, mat({ map: shTex, metalness: 0.4, roughness: 0.6 }));
+    this.shutter = new THREE.Mesh(g, mat({ map: load(shutterUrl, [1.6, 1]), metalness: 0.35, roughness: 0.6 }));
     this.shutter.position.set(6, 2.1, -0.1); s.add(this.shutter);
 
     // --- neighbourhood (decor only, not simulation entities) ---
     const r = rng(42);
-    const win = new THREE.MeshBasicMaterial({ color: '#ffcf7a' }); const winC = new THREE.MeshBasicMaterial({ color: '#7fd3e0' });
-    const roofTex = tex(16, (c) => { for (let x = 0; x < 16; x++) { c.fillStyle = x % 3 === 0 ? '#3a4a52' : '#56666c'; c.fillRect(x, 0, 1, 16); } }, [3, 3]);
-    const addHouse = (x: number, z: number, w: number, d: number, h: number, col: string) => {
-      s.add(box(w, h, d, mat({ color: col }), x, h / 2, z));
-      s.add(box(w + 0.3, 0.12, d + 0.3, mat({ map: roofTex }), x, h + 0.06, z));
-      for (let i = 0; i < 3; i++) if (r() > 0.35) {
-        s.add(box(0.45, 0.5, 0.05, r() > 0.5 ? win : winC, x - w / 2 + 0.8 + i * (w - 1.6) / 2, h * 0.6, z + d / 2 + 0.03));
-        s.add(box(0.05, 0.5, 0.45, r() > 0.5 ? win : winC, x + w / 2 + 0.03, h * 0.6, z - d / 2 + 0.8 + i * (d - 1.6) / 2));
+    const win = new THREE.MeshBasicMaterial({ color: '#ffc25e' }); const winC = new THREE.MeshBasicMaterial({ color: '#ffe2a6' });
+    const addHouse = (x: number, z: number, w: number, d: number, h: number, tint: string) => {
+      s.add(box(w, h, d, mat({ map: load(wallUrl, [w / 3, 1]), color: tint }), x, h / 2, z));
+      const roof = box(w + 0.5, 0.14, d + 0.5, mat({ map: load(roofUrl, [w / 3, d / 3]), metalness: 0.3, roughness: 0.6 }), x, h + 0.07, z); s.add(roof);
+      for (let i = 0; i < 3; i++) if (r() > 0.25) {
+        s.add(box(0.5, 0.55, 0.05, r() > 0.5 ? win : winC, x - w / 2 + 0.8 + i * (w - 1.6) / 2, h * 0.58, z + d / 2 + 0.03));
+        s.add(box(0.05, 0.55, 0.5, r() > 0.5 ? win : winC, x + w / 2 + 0.03, h * 0.58, z - d / 2 + 0.8 + i * (d - 1.6) / 2));
       }
     };
-    addHouse(-4.2, 3, 5, 6, 3.4, '#4d4a45'); addHouse(-4.5, -6.5, 6, 5, 4.6, '#55504a'); addHouse(3, -8.5, 6, 4.5, 3.8, '#4a5354');
-    addHouse(10.5, -8.2, 6.5, 4, 5.2, '#5a4f48'); addHouse(-5, 10.5, 6, 5, 3, '#46484a'); addHouse(17.5, -3, 5, 7, 4.2, '#4f4a4d');
-    // neon sign
-    s.add(box(0.08, 1.4, 0.5, new THREE.MeshBasicMaterial({ color: '#ff4f86' }), -1.65, 2.3, 3));
-    // food cart
-    const cart = new THREE.Group();
-    cart.add(box(1.1, 0.6, 0.7, mat({ color: '#b9b2a2', metalness: 0.5, roughness: 0.4 }), 0, 0.6, 0));
-    cart.add(box(0.05, 1.4, 0.05, pil, 0, 1.3, 0));
-    const umb = new THREE.Mesh(new THREE.ConeGeometry(1, 0.4, 8), mat({ color: '#c5402f', flatShading: true })); umb.position.y = 2.1; cart.add(umb);
-    cart.add(box(0.18, 0.18, 0.18, win, 0.3, 1.0, 0));
-    cart.position.set(10.2, 0, -2.4); s.add(cart);
+    addHouse(-4.2, 3, 5, 6, 3.2, '#9c8f84'); addHouse(-4.5, -6.5, 6, 5, 4.4, '#8f857c'); addHouse(3, -8.5, 6, 4.5, 3.6, '#9a9088');
+    addHouse(10.5, -8.2, 6.5, 4, 5, '#8c8178'); addHouse(-5, 10.5, 6, 5, 3, '#958a80'); addHouse(17.5, -3, 5, 7, 4, '#90857c');
+    addHouse(17.8, 6.5, 5, 6, 3.2, '#998e84'); addHouse(4, 14, 7, 5, 3.4, '#8f857c'); addHouse(13, 13.5, 6, 5, 3, '#958a80');
+    s.add(box(0.08, 1.4, 0.5, new THREE.MeshBasicMaterial({ color: '#ff4f86' }), -1.65, 2.3, 3)); // neon sign
     // power pole + lines
-    s.add(box(0.18, 5.4, 0.18, mat({ color: '#3b332c' }), 1.2, 2.7, -3.6), box(1.4, 0.1, 0.1, mat({ color: '#3b332c' }), 1.2, 5, -3.6));
+    s.add(box(0.18, 5.4, 0.18, pil, 1.2, 2.7, -3.6), box(1.4, 0.1, 0.1, pil, 1.2, 5, -3.6));
     const lm = new THREE.LineBasicMaterial({ color: '#15191c' });
     [[-0.5, 0], [0, 0.3], [0.5, -0.2]].forEach(([o, sag]) => {
       const pts = []; for (let i = 0; i <= 12; i++) { const k = i / 12; pts.push(new THREE.Vector3(1.2 + o + k * 17, 5 - Math.sin(k * Math.PI) * (0.9 + sag), -3.6 + k * 0.6)); }
       s.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lm));
     });
-    // street lamp, plants, scooter
-    s.add(box(0.1, 3.2, 0.1, mat({ color: '#2a2a2a' }), 6, 1.6, -2.9), box(0.35, 0.12, 0.35, win, 6, 3.2, -2.75));
-    [[13, 2], [13.2, 5.5], [-0.9, -1.2], [8.8, -0.9]].forEach(([x, z]) => {
-      s.add(box(0.4, 0.35, 0.4, mat({ color: '#8a4b33' }), x, 0.17, z));
-      const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45, 0), mat({ color: '#3f7a4a', flatShading: true })); leaf.position.set(x, 0.75, z); s.add(leaf);
-    });
-    s.add(box(1.1, 0.45, 0.3, mat({ color: '#2f6f86', metalness: 0.5, roughness: 0.4 }), 13.4, 0.4, -1.5), box(0.3, 0.3, 0.3, mat({ color: '#15191c' }), 12.95, 0.15, -1.5), box(0.3, 0.3, 0.3, mat({ color: '#15191c' }), 13.85, 0.15, -1.5));
+    s.add(box(0.1, 3.2, 0.1, pil, 6, 1.6, -2.9), box(0.35, 0.12, 0.35, win, 6, 3.2, -2.75)); // street lamp
+    // generated prop sprites
+    s.add(sprite(cartUrl, 2.3, 9.9, -2.3), sprite(plantsUrl, 1.5, 12.9, 2.2), sprite(plantsUrl, 1.3, -0.9, -1.3), sprite(plantsUrl, 1.2, 2.6, 9.1), sprite(scooterUrl, 1.15, 13.3, 6.4));
 
     // --- Rin (billboard pixel sprite) ---
-    const rinTex = tex(16, (c) => {
-      c.clearRect(0, 0, 16, 16);
-      const px = (col: string, x: number, y: number, w = 1, h = 1) => { c.fillStyle = col; c.fillRect(x, y, w, h); };
-      px('#1b1512', 5, 0, 6, 3); px('#1b1512', 4, 2, 1, 4); px('#1b1512', 11, 2, 1, 4);   // hair
-      px('#c98d63', 5, 2, 6, 4); px('#1b1512', 6, 4); px('#1b1512', 9, 4);                 // face
-      px('#597789', 4, 6, 8, 5); px('#c98d63', 3, 7, 1, 3); px('#c98d63', 12, 7, 1, 3);    // jacket + arms
-      px('#f0e5cd', 10, 8, 3, 3);                                                          // notebook
-      px('#2c2a30', 5, 11, 6, 4); px('#141214', 5, 15, 2, 1); px('#141214', 9, 15, 2, 1);  // legs + shoes
-    });
-    this.rin = new THREE.Sprite(new THREE.SpriteMaterial({ map: rinTex, transparent: true, alphaTest: 0.5 }));
-    this.rin.scale.set(1.25, 1.25, 1); this.rin.position.set(6, 0.62, -3.2); s.add(this.rin);
+    this.rin = sprite(rinUrl, 1.45, 6, -3.2); s.add(this.rin);
 
     // --- placement ghost ---
     this.ghost = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#f0e5cd', transparent: true, opacity: 0.55, depthTest: false }));
@@ -166,14 +144,14 @@ export class CampScene {
     const n = this.reduced ? 0 : 320; const pos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { pos[i * 3] = -8 + r() * 30; pos[i * 3 + 1] = r() * 12; pos[i * 3 + 2] = -12 + r() * 28; }
     const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.rain = new THREE.Points(rg, new THREE.PointsMaterial({ color: '#9fc4d6', size: 1, sizeAttenuation: false, transparent: true, opacity: 0.4 }));
+    this.rain = new THREE.Points(rg, new THREE.PointsMaterial({ color: '#c9dbe2', size: 1, sizeAttenuation: false, transparent: true, opacity: 0.4 }));
     s.add(this.rain);
   }
 
   resize() {
     const w = Math.max(1, this.canvas.clientWidth), h = Math.max(1, this.canvas.clientHeight);
     this.renderer.setSize(Math.ceil(w / PIXEL), Math.ceil(h / PIXEL), false);
-    const aspect = w / h; const viewH = Math.max(19 / aspect, 15.5);
+    const aspect = w / h; const viewH = Math.max(15.5 / aspect, 12.5);
     this.cam.left = -viewH * aspect / 2; this.cam.right = viewH * aspect / 2; this.cam.top = viewH / 2; this.cam.bottom = -viewH / 2;
     const el = THREE.MathUtils.degToRad(52), az = THREE.MathUtils.degToRad(45), dist = 40;
     this.cam.position.set(this.target.x + dist * Math.cos(el) * Math.sin(az), dist * Math.sin(el), this.target.z + dist * Math.cos(el) * Math.cos(az));
@@ -219,10 +197,10 @@ export class CampScene {
     this.shutterOpen += (this.shutterGoal - this.shutterOpen) * Math.min(1, dt * (this.reduced ? 60 : 1.8));
     this.shutter.scale.y = 1 - this.shutterOpen * 0.86;
     const lit = this.shutterOpen > 0.5 ? (Math.sin(time * 23) > -0.96 || this.reduced ? 1 : 0.35) : 0;
-    this.tube.intensity = 46 * lit; (this.tubeMesh.material as THREE.MeshBasicMaterial).color.set(lit > 0.5 ? '#fff1cf' : '#3a3833');
+    this.tube.intensity = 24 * lit; (this.tubeMesh.material as THREE.MeshBasicMaterial).color.set(lit > 0.5 ? '#fff1cf' : '#3a3833');
     this.rin.position.z += (this.rinGoal - this.rin.position.z) * Math.min(1, dt * (this.reduced ? 60 : 1.2));
     const moving = Math.abs(this.rinGoal - this.rin.position.z) > 0.08;
-    this.rin.position.y = 0.62 + (moving ? Math.abs(Math.sin(time * 9)) * 0.07 : 0);
+    this.rin.position.y = (moving ? Math.abs(Math.sin(time * 9)) * 0.07 : 0);
     this.drip.position.y = 2.6 - ((time * 1.7) % 1) * 2.6;
     const p = this.rain.geometry.getAttribute('position') as THREE.BufferAttribute;
     for (let i = 0; i < p.count; i++) { let y = p.getY(i) - dt * 14; if (y < 0) y += 12; p.setY(i, y); }

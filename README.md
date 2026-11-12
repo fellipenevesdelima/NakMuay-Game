@@ -11,6 +11,8 @@ Jogo de gestão de um camp de Muay Thai na Tailândia. Three.js + TypeScript + V
 - `src/render/` — cena 3D montada a partir dos dados.
 - `src/i18n.ts` — pt-BR, en, th. O tailandês ainda não foi revisado por nativo.
 
+- `src/assets/` — texturas e sprites originais do jogo, gerados por IA (Higgsfield) e reduzidos para o estilo pixel.
+
 Todos os valores em baht são fictícios, para balanceamento.
 
 ## Estado
