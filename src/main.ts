@@ -65,7 +65,18 @@ const B = (n: number) => baht(L(), n);
 const TERMS: [string, string][] = [['fans', 'fans'], ['respect', 'respect'], ['mood', 'mood'], ['g_tech', 'tech'], ['g_clinch', 'clinch'], ['g_power', 'power'], ['g_cardio', 'cardio'], ['lifeLbl', 'life'], ['fatigue', 'warn'], ['tiredLbl', 'warn'], ['credLbl', 'respect']];
 const termOf = (text: string) => { const low = text.toLowerCase(); return TERMS.find(([k]) => low.includes(T(k).toLowerCase()))?.[1] ?? ''; };
 /** Sets text with status words and money in their colours. Builds nodes, never HTML strings. */
+const TAG: Record<string, string> = { t: 'time', w: 'weight', n: 'name', g: 'good', a: 'warn', b: 'bad' };
+const tagOf = (state: string) => (state === 'red' ? 'b' : state === 'warn' ? 'a' : 'g');
+/** Game data in speech is marked at the source as [t:week 2 of 3], [w:61 kg], [n:Niran]: bold, in the colour of its kind. */
 function paint(el: HTMLElement, text: string) {
+  const parts = text.split(/\[([a-z]):([^\]]*)\]/g), kids: (Node | string)[] = [];
+  for (let i = 0; i < parts.length; i += 3) {
+    if (parts[i]) { const tmp = h('span'); paintWords(tmp, parts[i]); kids.push(...Array.from(tmp.childNodes)); }
+    if (i + 2 < parts.length) kids.push(h('b', { cls: 'c-' + (TAG[parts[i + 1]] ?? 'name') }, parts[i + 2]));
+  }
+  el.replaceChildren(...kids);
+}
+function paintWords(el: HTMLElement, text: string) {
   const words = TERMS.map(([k, c]) => [T(k).toLowerCase(), c] as [string, string]).sort((a, b) => b[0].length - a[0].length);
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`([−+-]?฿[\\d.,]*\\d|[+−]\\d+(?= )|${words.map(w => esc(w[0])).join('|')})`, 'gi');
@@ -91,7 +102,7 @@ const seen: Record<string, number> = {}; let hint: string | null = null, menuOpe
 function stat(id: string, k: string, text: string, value?: number) {
   const el = $(id); el.replaceChildren(icon(k), h('b', {}, text)); el.setAttribute('aria-label', `${T('st_' + k)} ${text}`);
   if (value !== undefined) { const was = seen[id]; seen[id] = value;
-    if (was !== undefined && was !== value) { const d = value - was; el.append(h('i', { cls: 'delta ' + (d > 0 ? 'up' : 'down') }, (d > 0 ? '+' : '−') + (k === 'cash' ? num(L(), Math.abs(d)) : Math.abs(d)))); } }
+    if (was !== undefined && was !== value && !(k === 'time' && value < was)) { const d = value - was; el.append(h('i', { cls: 'delta ' + (d > 0 ? 'up' : 'down') }, k === 'time' ? T('hudDays', { n: d }) : (d > 0 ? '+' : '−') + (k === 'cash' ? num(L(), Math.abs(d)) : Math.abs(d)))); } }
 }
 
 const coach = () => state.staff[0]; const coachName = () => (coach() ? G.nameOf(coach().id) : G.nameOf('rin'));
@@ -115,7 +126,7 @@ function actors(): ActorSpec[] {
 function render() {
   const s = state, lang = L(); document.documentElement.lang = lang === 'pt' ? 'pt-BR' : lang;
   const inHub = s.step === 'hub' || s.step === 'camp' || s.step === 'season';
-  stat('sTime', 'time', inHub ? T('hudTime', { s: s.seasonNo, w: Math.min(s.seasonWeek + 1, G.SEASON.weeks) }) : `${T('day')} ${s.day}`);
+  stat('sTime', 'time', inHub ? T('hudTime', { s: s.seasonNo, w: Math.min(s.seasonWeek + 1, G.SEASON.weeks) }) : `${T('day')} ${s.day}`, s.day);
   stat('sCash', 'cash', B(s.cash), s.cash); stat('sFans', 'fans', String(s.fans), s.fans); stat('sRespect', 'respect', String(s.respect), s.respect); stat('sMood', 'mood', String(s.mood), s.mood);
   $('hint').hidden = !hint; if (hint) paint($('hint'), T('hint_' + hint));
   $('menu').hidden = !menuOpen; $('lang').textContent = T('langBtn', { l: lang.toUpperCase() }); $('reset').textContent = T(resetSure ? 'resetSure' : 'reset'); $('reset').className = resetSure ? 'danger on' : 'danger'; $('note').textContent = T('fictional');
@@ -233,7 +244,7 @@ function render() {
     case 'weighin': {
       speaker = spk(); const f = s.fight!, w = f.weighIn!, name = G.nameOf(f.fighterId);
       const c = Math.round(w.chance * 100) + '%';
-      line = w.made ? T('weighMade', { name, kg: f.limitKg, c }) : T('weighMissed', { name, over: num(lang, w.overKg), fine: B(w.fine), opp: G.opponentOf(f).name, c });
+      line = w.made ? T('weighMade', { name, kg: f.limitKg, c, rc: tagOf(st(w.chance, 0.15, 0.3)) }) : T('weighMissed', { rc: tagOf(st(w.chance, 0.15, 0.3)), name, over: num(lang, w.overKg), fine: B(w.fine), opp: G.opponentOf(f).name, c });
       if (f.campLog.length) body.append(h('p', { cls: 'small' }, f.campLog.map(l => T('lastWeek', { n: l.week, plan: T('wk_' + l.plan), by: T('by_' + l.by) })).join(' ')));
       btn(T('enterRing'), () => commit(G.enterRing(s))); break;
     }
@@ -345,7 +356,7 @@ function renderHub(body0: HTMLElement, btn: (label: string, fn: () => void, cls?
     if (f) {
       // fight camp: this week's plan for the athlete with a bout booked
       const name = G.nameOf(f.fighterId), me = s.fighters.find(x => x.id === f.fighterId)!, left = G.weeksLeft(f), final = left === 1, prev = f.campLog[f.campLog.length - 1];
-      line = final ? T('campFinal', { name, w: me.fatigue }) : T('camp', { i: f.campLog.length + 1, n: f.campWeeks, name, d: f.day, kg: f.limitKg, walk: num(lang, me.walkKg) });
+      line = final ? T('campFinal', { name, w: me.fatigue, wc: tagOf(st(me.fatigue)) }) : T('camp', { wc: G.cutPct(me.walkKg, f.limitKg) >= G.LIFE.severeCutPct ? 'b' : me.walkKg > f.limitKg ? 'a' : 'w', i: f.campLog.length + 1, n: f.campWeeks, name, d: f.day, kg: f.limitKg, walk: num(lang, me.walkKg) });
       if (prev) body.append(h('p', { cls: 'small' }, T('lastWeek', { n: prev.week, plan: T('wk_' + prev.plan), by: T('by_' + prev.by) })));
       body.append(h('div', { cls: 'bars' }, ...(['tech', 'clinch', 'power', 'cardio'] as const).map(k => h('label', { cls: 'a-' + k }, h('span', {}, `${T('g_' + k)} ${me[k]}`), h('i', {}, h('b', { style: `width:${me[k]}%` } as any)))),
         h('label', { cls: 'a-' + st(me.fatigue) }, h('span', {}, `${T('fatigue')} ${me.fatigue}`), h('i', {}, h('b', { style: `width:${me.fatigue}%` } as any)))));

@@ -38,6 +38,31 @@ const DOORSTEP: [number, number] = [430, 712];
 const FLOOR_CENTRE: [number, number] = [540, 490];
 const PERSON = 60;                                                                                     // standing height in painting pixels
 
+const LAMP: [number, number] = [618, 318];
+/** People get a little smaller towards the back of the yard, as the painted floor does. */
+const depth = (py: number) => 0.94 + 0.13 * Math.max(0, Math.min(1, (py - 330) / 390));
+/** True when someone standing here would be covered by a pillar. Nobody is ever parked in such a spot. */
+const hidden = (px: number, py: number) => PILLARS.some(([x0, , x1, y1]) => px > x0 - 16 && px < x1 + 16 && py < y1 + 3 && py > y1 - 62);
+function clearSpot(x: number, z: number): [number, number] {
+  for (const dx of [0, 0.9, -0.9, 1.6, -1.6]) { const gx = Math.max(0.4, Math.min(GRID.w - 0.4, x + dx)); const [px, py] = toPx(gx, z); if (!hidden(px, py) && !NO_STAND.some(([bx, bz]) => Math.floor(gx) === bx && Math.floor(z) === bz)) return [gx, z]; }
+  return [x, z];
+}
+const walkable = (x: number, z: number) => x >= 0 && z >= 0 && x < GRID.w && z < GRID.d && !NO_STAND.slice(0, 2).some(([bx, bz]) => bx === x && bz === z);   // only the pillars block a walk
+const sight = (a: [number, number], b: [number, number]) => { for (let i = 1; i < 14; i++) { const t = i / 14; if (!walkable(Math.floor(a[0] + (b[0] - a[0]) * t), Math.floor(a[1] + (b[1] - a[1]) * t))) return false; } return true; };
+/** A way across the yard that goes around the pillars: breadth-first on the grid, then straightened. Grid coordinates. */
+function route(from: [number, number], to: [number, number]): [number, number][] {
+  const cl = (v: number, hi: number) => Math.max(0, Math.min(hi - 1, Math.floor(v))), s0 = [cl(from[0], GRID.w), cl(from[1], GRID.d)], e = [cl(to[0], GRID.w), cl(to[1], GRID.d)];
+  if (sight(from, to)) return [to];
+  const key = (x: number, z: number) => z * GRID.w + x, prev = new Map<number, number>([[key(s0[0], s0[1]), -1]]), q = [s0];
+  while (q.length) { const [x, z] = q.shift()!; if (x === e[0] && z === e[1]) break;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const nx = x + dx, nz = z + dz;
+      if (!walkable(nx, nz) || prev.has(key(nx, nz)) || (dx && dz && (!walkable(x + dx, z) || !walkable(x, z + dz)))) continue; prev.set(key(nx, nz), key(x, z)); q.push([nx, nz]); } }
+  const cells: [number, number][] = []; let k = key(e[0], e[1]); if (!prev.has(k)) return [to];
+  while (k !== -1 && k !== key(s0[0], s0[1])) { cells.unshift([k % GRID.w + 0.5, Math.floor(k / GRID.w) + 0.5]); k = prev.get(k)!; }
+  const pts: [number, number][] = [...cells.slice(0, -1), to], out: [number, number][] = []; let at = from;
+  for (let i = 0; i < pts.length; i++) { let j = pts.length - 1; while (j > i && !sight(at, pts[j])) j--; out.push(pts[j]); at = pts[j]; i = j; }
+  return out;
+}
 const loader = new THREE.TextureLoader();
 function load(url: string) { const t = loader.load(url); t.colorSpace = THREE.SRGBColorSpace; return t; }
 const P = (px: number, py: number, z = 0) => new THREE.Vector3(px, -py, z);
@@ -53,8 +78,9 @@ function cutout(points: [number, number][], map: THREE.Texture, order: number) {
 }
 /** A textured patch lying on the floor plane, subdivided per half cell so it follows the painting's perspective. */
 function floorPatch(x: number, z: number, w: number, d: number, mat: THREE.Material) {
-  const nx = w * 2, nz = d * 2, pos: number[] = [], uv: number[] = [], idx: number[] = [];
-  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) { const [px, py] = toPx(x + i / 2, z + j / 2); pos.push(px, -py, 0); uv.push(i / nx, 1 - j / nz); }
+  // whole numbers of subdivisions only: a fractional count once produced stray triangles across the yard
+  const nx = Math.max(1, Math.round(w * 2)), nz = Math.max(1, Math.round(d * 2)), pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) { const [px, py] = toPx(x + i * w / nx, z + j * d / nz); pos.push(px, -py, 0); uv.push(i / nx, 1 - j / nz); }
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, e = c + 1; idx.push(a, c, b, b, c, e); }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
   return new THREE.Mesh(g, mat);
@@ -63,7 +89,7 @@ function floorPatch(x: number, z: number, w: number, d: number, mat: THREE.Mater
 interface Actor {
   id: string; mesh: THREE.Mesh; shadow: THREE.Mesh; pos: [number, number]; path: [number, number][]; inside: boolean; away: boolean; work: boolean;
   tex: Map<string, THREE.Texture>; key: string; phase: number; flip: boolean;
-  spec: ActorSpec; home: [number, number]; job: { kind: 'pair' | 'solo'; partner?: Actor; clock: number } | null;
+  walked: number; spec: ActorSpec; home: [number, number]; job: { kind: 'pair' | 'solo'; partner?: Actor; clock: number } | null;
 }
 
 export class CampScene {
@@ -76,7 +102,7 @@ export class CampScene {
   private ghost: THREE.Mesh | null = null; private ghostMat = new THREE.MeshBasicMaterial({ color: '#f0e5cd', transparent: true, opacity: 0.5, depthTest: false });
   private rain!: THREE.LineSegments;
   private actors = new Map<string, Actor>();
-  private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Mesh>(); private mats: Facility[] = []; private turn = -1; private glowTex!: THREE.Texture; private spark!: THREE.Mesh; private moths!: THREE.Points;
+  private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Mesh>(); private mats: Facility[] = []; private turn = -1; private glowTex!: THREE.Texture; private water!: THREE.Mesh; private ripples: { m: THREE.Mesh; t: number; life: number }[] = []; private shimmer!: THREE.Mesh; private windows: THREE.Mesh[] = []; private spark!: THREE.Mesh; private moths!: THREE.Points;
   private matTex = load(matUrl);
   private clock = new THREE.Clock(); private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   private unitsPerPx = 1; private view = { x: 0, y: 0 };
@@ -109,6 +135,17 @@ export class CampScene {
     this.spark = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshBasicMaterial({ map: this.glowTex, transparent: true, blending: THREE.AdditiveBlending, depthTest: false })); this.spark.renderOrder = 6400; this.spark.visible = false; s.add(this.spark);
     const mg = new THREE.BufferGeometry(); mg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(8 * 3), 3));
     this.moths = new THREE.Points(mg, new THREE.PointsMaterial({ color: '#ffe9b0', size: 2.2, transparent: true, opacity: 0.85, depthTest: false })); this.moths.renderOrder = 6500; s.add(this.moths);
+    // the gutter by the entrance actually runs
+    const wc = document.createElement('canvas'); wc.width = 8; wc.height = 64; const wg = wc.getContext('2d')!;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 8; x++) { const v = Math.random(); wg.fillStyle = `rgba(215,235,245,${v > 0.55 ? 0.25 + v * 0.6 : 0.08})`; wg.fillRect(x, y, 1, 1); }
+    const wt = new THREE.CanvasTexture(wc); wt.wrapT = THREE.RepeatWrapping; wt.magFilter = THREE.NearestFilter; wt.repeat.set(1, 2);
+    this.water = new THREE.Mesh(new THREE.PlaneGeometry(7, 124), new THREE.MeshBasicMaterial({ map: wt, ...FLAT })); this.water.position.copy(P(569.5, 669)); this.water.renderOrder = 5200; s.add(this.water);
+    // rain rings on the wet street, and the splash where the gutter lands
+    const ring = new THREE.RingGeometry(0.72, 1, 20), spots = (): [number, number] => { const r = Math.random(); return r < 0.2 ? [569.5 + (Math.random() - 0.5) * 8, 733 + Math.random() * 3] : r < 0.75 ? ((x) => [x, 590 + (x - 70) * 0.44 + Math.random() * 110] as [number, number])(70 + Math.random() * 500) : [690 + Math.random() * 190, 560 + Math.random() * 220]; };
+    for (let i = 0; i < (this.reduced ? 0 : 22); i++) { const m = new THREE.Mesh(ring, new THREE.MeshBasicMaterial({ color: '#d5e4ee', ...FLAT, opacity: 0 })); m.renderOrder = 5100; m.userData.spot = spots; s.add(m); this.ripples.push({ m, t: Math.random() * 1.4, life: 0.9 + Math.random() * 0.7 }); }
+    // the tube's reflection trembling on the wet cement, and neighbours' lights that are not perfectly steady
+    this.shimmer = new THREE.Mesh(new THREE.PlaneGeometry(250, 110), new THREE.MeshBasicMaterial({ map: this.glowTex, transparent: true, blending: THREE.AdditiveBlending, depthTest: false, opacity: 0 })); this.shimmer.position.copy(P(585, 425)); this.shimmer.renderOrder = 0.8; s.add(this.shimmer);
+    for (const [x, y, w] of [[233, 149, 46], [787, 273, 50], [989, 543, 54], [800, 920, 60], [240, 900, 56], [113, 527, 64], [153, 247, 40]]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.8), new THREE.MeshBasicMaterial({ map: this.glowTex, transparent: true, blending: THREE.AdditiveBlending, depthTest: false, opacity: 0.2 })); m.position.copy(P(x, y)); m.renderOrder = 5300; s.add(m); this.windows.push(m); }
     // darkness while the camp is still locked
     this.night = new THREE.Mesh(new THREE.PlaneGeometry(IMG * 3, IMG * 3), new THREE.MeshBasicMaterial({ color: '#070a12', transparent: true, opacity: 0.6, depthTest: false }));
     this.night.position.copy(P(IMG / 2, IMG / 2)); this.night.renderOrder = 7000; s.add(this.night);
@@ -174,14 +211,14 @@ export class CampScene {
   setActors(list: ActorSpec[], instant = false) {
     for (const [id, a] of this.actors) if (!list.some(l => l.id === id)) { this.scene.remove(a.mesh, a.shadow); this.actors.delete(id); }
     for (const l of list) {
-      const home: [number, number] = l.outside ? DOORSTEP : toPx(l.x, l.z);
+      const home: [number, number] = l.outside ? DOORSTEP : toPx(...clearSpot(l.x, l.z));
       let a = this.actors.get(l.id);
       if (!a) {
         const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0, 0.5, 0);
         const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ ...FLAT, alphaTest: 0.25, side: THREE.DoubleSide, color: '#f1e3d2' }));
         const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 20), new THREE.MeshBasicMaterial({ color: '#000', ...FLAT, opacity: 0.32 })); shadow.scale.set(15, 6, 1);
         const start: [number, number] = instant && !l.away ? home : ROUTE_IN[0];
-        a = { id: l.look ?? l.id, mesh, shadow, pos: [...start], path: [], inside: instant && !l.outside && !l.away, away: false, work: false, tex: new Map(), key: '', phase: this.actors.size * 0.37, flip: false, spec: l, home, job: null };
+        a = { id: l.look ?? l.id, mesh, shadow, pos: [...start], path: [], inside: instant && !l.outside && !l.away, away: false, work: false, tex: new Map(), key: '', phase: this.actors.size * 0.37, flip: false, walked: 0, spec: l, home, job: null };
         this.actors.set(l.id, a); this.scene.add(mesh, shadow);
       }
       a.spec = l; a.home = home; a.away = !!l.away; a.work = !!l.work;
@@ -192,9 +229,11 @@ export class CampScene {
   /** Sends an actor somewhere, through the entrance and never through a wall. */
   private go(a: Actor, dest: [number, number], wantInside: boolean, instant: boolean) {
     const last = a.path.length ? a.path[a.path.length - 1] : a.pos; if (Math.hypot(last[0] - dest[0], last[1] - dest[1]) < 1 && a.inside === wantInside) return;
+    const door = toGrid(...ROUTE_IN[2]) as [number, number], px = (pts: [number, number][]) => pts.map(([x, z]) => toPx(x, z));
     if (instant) { a.pos = [...dest]; a.path = []; }
-    else if (a.inside && !wantInside) a.path = [ROUTE_IN[2], ROUTE_IN[1], dest];
-    else if (!a.inside && wantInside) a.path = [ROUTE_IN[1], ROUTE_IN[2], dest];
+    else if (a.inside && !wantInside) a.path = [...px(route(toGrid(...a.pos) as [number, number], door)), ROUTE_IN[2], ROUTE_IN[1], dest];
+    else if (!a.inside && wantInside) a.path = [ROUTE_IN[1], ROUTE_IN[2], ...px(route(door, toGrid(...dest) as [number, number]))];
+    else if (wantInside) a.path = px(route(toGrid(...a.pos) as [number, number], toGrid(...dest) as [number, number]));
     else a.path = [dest];
     a.inside = wantInside;
   }
@@ -219,7 +258,7 @@ export class CampScene {
           const z = mat.z + (coaches.length > 1 ? 0.55 + i * 0.9 : mat.d / 2 + 0.1), tempo = c.spec.tempo ?? 1;
           f.job = { kind: 'pair', partner: c, clock: tempo }; c.job = { kind: 'pair', partner: f, clock: tempo };
           this.go(f, toPx(mat.x + mat.w / 2 - 0.5, z), true, instant); this.go(c, toPx(mat.x + mat.w / 2 + 0.5, z), true, instant);
-        } else { f.job = { kind: 'solo', clock: 1 }; const [x, z] = solo[(i - coaches.length) % solo.length]; this.go(f, toPx(x, z), true, instant); }
+        } else { f.job = { kind: 'solo', clock: 1 }; const [x, z] = solo[(i - coaches.length) % solo.length]; this.go(f, toPx(...clearSpot(x, z)), true, instant); }
       });
     }
     for (const a of all) if (!a.job) this.go(a, a.away ? ROUTE_IN[0] : a.home, !a.away && !a.spec.outside, instant);
@@ -236,7 +275,10 @@ export class CampScene {
     if (sheet) { t.offset.x = (((Math.floor(frame) % sheet.frames) + sheet.frames) % sheet.frames) / sheet.frames; h = PERSON * sheet.h / 150; w = h * sheet.w / sheet.h; }
     else if (t.image) { const im = t.image as HTMLImageElement; if (im.width) w = h * im.width / im.height; }
     const faceLeft = !sheet || sheet.face === 'L';
-    a.mesh.scale.set((a.flip === faceLeft ? -1 : 1) * w, h, 1); // flip = "should look to the right"
+    const k = depth(a.pos[1]); a.mesh.scale.set((a.flip === faceLeft ? -1 : 1) * w * k, h * k, 1); // flip = "should look to the right"
+    // warm under the tube, cold towards the street: the same light the painting has
+    const warm = Math.max(0, 1 - Math.hypot(a.pos[0] - LAMP[0], a.pos[1] - LAMP[1] - 90) / 330), out = a.pos[1] > 640 ? 0.8 : 1;
+    (a.mesh.material as THREE.MeshBasicMaterial).color.setRGB((0.7 + 0.3 * warm) * out, (0.7 + 0.24 * warm) * out, (0.78 + 0.06 * warm) * out);
   }
 
   private frame() {
@@ -247,6 +289,13 @@ export class CampScene {
     (this.glow.material as THREE.MeshBasicMaterial).opacity = lit * (0.16 + (this.reduced ? 0 : Math.sin(time * 13) * 0.03 + Math.sin(time * 2.1) * 0.03));
     for (const m of this.built.values()) { const mat = m.material as THREE.MeshBasicMaterial; if (mat.opacity < 1) mat.opacity = Math.min(1, mat.opacity + dt * 1.6); }
     this.spark.visible = false; this.moths.visible = lit > 0;
+    if (!this.reduced) {
+      (this.water.material as THREE.MeshBasicMaterial).map!.offset.y += dt * 2.6;
+      for (const r of this.ripples) { r.t += dt; if (r.t > r.life) { r.t = 0; r.life = 0.8 + Math.random() * 0.8; const [x, y] = (r.m.userData.spot as () => [number, number])(); r.m.position.copy(P(x, y)); }
+        const k = r.t / r.life; r.m.scale.set(2 + k * 9, (2 + k * 9) * 0.5, 1); (r.m.material as THREE.MeshBasicMaterial).opacity = (1 - k) * 0.5; }
+      (this.shimmer.material as THREE.MeshBasicMaterial).opacity = lit * (0.1 + Math.sin(time * 7.3) * 0.02 + Math.sin(time * 2.9) * 0.03); this.shimmer.scale.x = 1 + Math.sin(time * 1.7) * 0.04;
+      this.windows.forEach((m, i) => { (m.material as THREE.MeshBasicMaterial).opacity = 0.2 + Math.sin(time * (0.7 + i * 0.31) + i * 1.9) * 0.08 + (Math.sin(time * (5 + i)) > 0.985 ? -0.15 : 0); });
+    }
     if (!this.reduced) { const mp = this.moths.geometry.getAttribute('position') as THREE.BufferAttribute;
       for (let i = 0; i < mp.count; i++) { const a = time * (0.9 + i * 0.23) + i * 2.1; mp.setXYZ(i, 618 + Math.cos(a) * (18 + i * 5) + Math.sin(a * 2.3) * 6, -(316 + Math.sin(a * 1.4) * (9 + i * 2)), 0); } mp.needsUpdate = true; }
     const turn = Math.floor(time / (CYCLE * TURN)); if (turn !== this.turn) { this.turn = turn; this.assign(); }
@@ -255,12 +304,12 @@ export class CampScene {
       if (a.path.length) {
         const [tx, ty] = a.path[0], dx = tx - a.pos[0], dy = ty - a.pos[1], d = Math.hypot(dx, dy), step = (this.reduced ? 2000 : 62) * dt;
         if (d <= step) { a.pos = [tx, ty]; a.path.shift(); } else { a.pos[0] += dx / d * step; a.pos[1] += dy / d * step; }
-        if (Math.abs(dx) > 0.5) a.flip = dx > 0; moving = a.path.length > 0 || d > step;
+        if (Math.abs(dx) > 0.5) a.flip = dx > 0; moving = a.path.length > 0 || d > step; a.walked += Math.min(d, step);
       }
       const hidden = a.away && !moving;
       a.mesh.visible = a.shadow.visible = !hidden;
       const job = a.job, partner = job?.partner, ready = !!partner && !partner.path.length && !a.path.length;
-      if (moving) this.show(a, SHEETS[a.id + '_walk'] ? a.id + '_walk' : a.id, (time + a.phase) * 9);
+      if (moving) this.show(a, SHEETS[a.id + '_walk'] ? a.id + '_walk' : a.id, a.walked / 4.2);   // the stride follows the ground covered, so nobody glides
       else if (job?.kind === 'pair' && partner && ready) {
         // one clock for the two of them: the strike and the pad land on the same frame, then both reset
         a.flip = partner.pos[0] > a.pos[0];
@@ -275,7 +324,9 @@ export class CampScene {
         this.show(a, hit ? a.id + '_attack' : SHEETS[a.id + '_guard'] ? a.id + '_guard' : a.id, hit ? p / 0.25 * 8 : (time + a.phase) * 6);
       } else { a.flip = false; this.show(a, a.id, 0); }
       a.mesh.position.copy(P(a.pos[0], a.pos[1])); a.mesh.renderOrder = a.pos[1];
-      a.shadow.position.copy(P(a.pos[0], a.pos[1] - 1)); a.shadow.renderOrder = a.pos[1] - 0.5;
+      // the shadow falls away from the tube, like the painted ones
+      const vx = a.pos[0] - LAMP[0], vy = a.pos[1] - LAMP[1], vl = Math.hypot(vx, vy) || 1, sk = depth(a.pos[1]);
+      a.shadow.position.copy(P(a.pos[0] + vx / vl * 7, a.pos[1] - 1 + vy / vl * 3)); a.shadow.rotation.z = -Math.atan2(vy * 0.5, vx); a.shadow.scale.set(18 * sk, 6 * sk, 1); a.shadow.renderOrder = a.pos[1] - 0.5;
     }
     if (this.ghost) this.ghostMat.opacity = 0.42 + Math.sin(time * 5) * 0.14;
     const p = this.rain.geometry.getAttribute('position') as THREE.BufferAttribute;

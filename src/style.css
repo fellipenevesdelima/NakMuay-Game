@@ -248,3 +248,15 @@ details.sect { border-radius: 10px; } details.sect > summary { border-radius: 10
 @keyframes ko { from { opacity: 0; transform: scale(3) rotate(-8deg); } 18% { opacity: 1; transform: scale(1) rotate(-4deg); } 80% { opacity: 1; } to { opacity: 0; transform: scale(1.1) rotate(-4deg); } }
 #app:not(.fighting) #crowd, #app:not(.fighting) #stage .haze, #app:not(.fighting) #stage .lights { display: none; }
 @media (prefers-reduced-motion: reduce) { .sp, .moth, #stage .haze, #stage .lights, #stage.roar .sq { animation: none !important; } }
+
+/* ================= data in speech; time in the top bar; one light for sprites and painting ================= */
+:root { --time:#A9D4FF; --weight:#FF9FD6; }
+.c-time { color: var(--time); font-weight: 800; } .c-weight { color: var(--weight); font-weight: 800; } .c-name { color: #fff6e2; font-weight: 800; }
+b.c-good, b.c-warn, b.c-bad { font-weight: 800; }
+.stat.time { color: var(--time); font-size: 12.5px; font-weight: 800; background: linear-gradient(#263648, #18222e); box-shadow: 0 2px 0 rgba(0,0,0,.55), 0 0 0 1.5px rgba(169,212,255,.55) inset, 0 1px 0 rgba(255,255,255,.18) inset; }
+.stat.time .delta.up { color: var(--time); }
+/* fight night: the cast takes the lamp-lit warmth and softness of the painted ring */
+.sp { filter: sepia(.28) saturate(.8) brightness(.78) contrast(.94) drop-shadow(0 3px 2px rgba(0,0,0,.6)); image-rendering: auto; }
+.sp.fan.cheer { filter: sepia(.2) saturate(.9) brightness(.95) drop-shadow(0 3px 2px rgba(0,0,0,.6)); }
+.sp.cast { filter: sepia(.22) saturate(.85) brightness(.9) drop-shadow(0 3px 2px rgba(0,0,0,.6)); }
+#app.fighting .fighter { filter: sepia(.15) saturate(.9) drop-shadow(0 4px 2px rgba(0,0,0,.6)); }
