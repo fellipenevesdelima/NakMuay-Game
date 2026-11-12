@@ -1,6 +1,6 @@
 import './style.css';
 import { CampScene } from './render/scene';
-import { TUNING, buyMat, canPlace, cancelPlacing, clearSave, load, newGame, openGate, save, startPlacing, type GameState } from './sim/state';
+import { GRID, TUNING, buyMat, canPlace, cancelPlacing, clearSave, load, newGame, openGate, save, startPlacing, type GameState } from './sim/state';
 import { baht, nextLang, t } from './i18n';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -36,33 +36,38 @@ function render() {
     const b = document.createElement('button'); b.textContent = label; b.className = cls; b.disabled = disabled; b.onclick = fn; btns.appendChild(b);
   };
   if (state.step === 'gate') add(t(L, 'gateBtn'), () => commit(openGate(state)));
-  if (state.step === 'walk') add(t(L, 'walkBtn'), () => { ghost = null; warn = false; commit(startPlacing(state)); });
+  if (state.step === 'walk') add(t(L, 'walkBtn'), () => { ghost = null; pinned = false; warn = false; commit(startPlacing(state)); });
   if (state.step === 'place') {
     costs.innerHTML = `<dt>${t(L, 'cost')}</dt><dd>${baht(L, TUNING.matCost)}</dd><dt>${t(L, 'after')}</dt><dd>${baht(L, state.cash - TUNING.matCost)}</dd>`;
     const ok = !!ghost && canPlace(state, ghost.x, ghost.z);
     add(t(L, 'confirm'), () => {
       if (!ghost) return;
       const r = buyMat(state, ghost.x, ghost.z);
-      if (r.ok) { ghost = null; warn = false; state = r.state; save(state); scene.setFacilities(state.facilities, true); render(); }
+      if (r.ok) { ghost = null; pinned = false; warn = false; state = r.state; save(state); scene.setFacilities(state.facilities, true); render(); }
       else { warn = true; render(); }
     }, '', !ok);
-    add(t(L, 'back'), () => { ghost = null; warn = false; commit(cancelPlacing(state)); }, 'ghost');
+    add(t(L, 'back'), () => { ghost = null; pinned = false; warn = false; commit(cancelPlacing(state)); }, 'ghost');
   }
   scene.setGate(state.step !== 'gate');
   scene.setGhost(state.step === 'place' && ghost ? { ...ghost, w: TUNING.matW, d: TUNING.matD, valid: canPlace(state, ghost.x, ghost.z) } : null);
 }
 
-function point(e: PointerEvent) {
+// A click or tap pins the mat; mouse hover only previews until then, so moving to the button keeps the spot.
+let pinned = false;
+function point(e: PointerEvent, pin: boolean) {
   if (state.step !== 'place') return;
+  if (!pin && pinned) return;
   const cell = scene.pickCell(e.clientX, e.clientY); if (!cell) return;
-  // Centre the footprint on the finger and keep it inside the floor.
-  const x = Math.max(0, Math.min(12 - TUNING.matW, cell.x - 1)), z = Math.max(0, Math.min(8 - TUNING.matD, cell.z));
+  // Centre the footprint on the pointer and keep it inside the floor.
+  const x = Math.max(0, Math.min(GRID.w - TUNING.matW, cell.x - 1)), z = Math.max(0, Math.min(GRID.d - TUNING.matD, cell.z));
+  if (pin) pinned = true;
+  if (ghost && ghost.x === x && ghost.z === z) return;
   ghost = { x, z }; warn = !canPlace(state, x, z); render();
 }
-canvas.addEventListener('pointerdown', point);
-canvas.addEventListener('pointermove', e => { if (e.buttons || e.pointerType === 'mouse') point(e); });
+canvas.addEventListener('pointerdown', e => point(e, true));
+canvas.addEventListener('pointermove', e => { if (e.buttons) point(e, true); else if (e.pointerType === 'mouse') point(e, false); });
 $('lang').onclick = () => commit({ ...state, lang: nextLang(state.lang) });
-$('reset').onclick = () => { const lang = state.lang; clearSave(); ghost = null; warn = false; state = newGame(lang); scene.setFacilities([]); scene.setGate(false, true); save(state); render(); };
+$('reset').onclick = () => { const lang = state.lang; clearSave(); ghost = null; pinned = false; warn = false; state = newGame(lang); scene.setFacilities([]); scene.setGate(false, true); save(state); render(); };
 
 new ResizeObserver(() => scene.resize()).observe(canvas);
 scene.setGate(state.step !== 'gate', true);
