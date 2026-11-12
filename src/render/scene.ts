@@ -13,11 +13,12 @@ import cartUrl from '../assets/cart.webp';
 import plantsUrl from '../assets/plants.webp';
 import scooterUrl from '../assets/scooter.webp';
 import somchaiUrl from '../assets/somchai.webp';
-import daoUrl from '../assets/dao.webp';
+import daengUrl from '../assets/daeng.webp';
+import petchUrl from '../assets/petch.webp';
 import maliUrl from '../assets/mali.webp';
 import niranUrl from '../assets/niran.webp';
 
-export const SPRITES: Record<string, string> = { rin: rinUrl, somchai: somchaiUrl, dao: daoUrl, mali: maliUrl, niran: niranUrl };
+export const SPRITES: Record<string, string> = { rin: rinUrl, somchai: somchaiUrl, daeng: daengUrl, mali: maliUrl, niran: niranUrl, petch: petchUrl };
 export interface ActorSpec { id: string; x: number; z: number; away?: boolean; busy?: boolean; }
 interface Actor { sp: THREE.Sprite; gx: number; gz: number; away: boolean; busy: boolean; phase: number; }
 const GATE = { x: 6, z: 0.5 }, OUTSIDE = { x: 6, z: -3.4 };

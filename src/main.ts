@@ -5,6 +5,7 @@ import type { GameState, Instruction, School } from './sim/state';
 import { baht, nextLang, num, t } from './i18n';
 import ringUrl from './assets/ring.webp';
 import kaewUrl from './assets/kaew.webp';
+import fahUrl from './assets/fah.webp';
 import locBangkok from './assets/loc_bangkok.webp';
 import locPhuket from './assets/loc_phuket.webp';
 import locChiangmai from './assets/loc_chiangmai.webp';
@@ -18,8 +19,8 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEle
 const canvas = $<HTMLCanvasElement>('view');
 const scene = new CampScene(canvas);
 const stage = $('stage'); const LOC_IMG: Record<string, string> = { bangkok: locBangkok, phuket: locPhuket, chiangmai: locChiangmai };
-const ALL_SPRITES: Record<string, string> = { ...SPRITES, kaew: kaewUrl };
-($('stageImg') as HTMLImageElement).src = ringUrl; ($('fB') as HTMLImageElement).src = kaewUrl;
+const ALL_SPRITES: Record<string, string> = { ...SPRITES, kaew: kaewUrl, fah: fahUrl };
+($('stageImg') as HTMLImageElement).src = ringUrl;
 
 let state: GameState = G.load() ?? G.newGame();
 let ghost: { x: number; z: number } | null = null; let pinned = false; let warn = false; let busy = false; let first = true;
@@ -55,13 +56,13 @@ function title(text: string, spriteId?: string) { const t3 = h('h3'); if (sprite
 
 function actors(): ActorSpec[] {
   const s = state, m = s.facilities[0], list: ActorSpec[] = [];
-  const order: G.Step[] = ['intro', 'locations', 'gate', 'walk', 'place', 'coach', 'scout', 'away', 'report', 'roster', 'school', 'morning', 'summary', 'offer', 'prefight', 'fight', 'result', 'end'];
+  const order: G.Step[] = ['intro', 'locations', 'gate', 'walk', 'place', 'coach', 'scout', 'away', 'report', 'roster', 'school', 'morning', 'summary', 'offer', 'prefight', 'weighin', 'fight', 'result', 'end'];
   const at = (st: G.Step) => order.indexOf(s.step) >= order.indexOf(st);
   if (at('walk')) list.push({ id: 'rin', x: 5, z: 1.9, away: s.step === 'away' });
   if (m) {
     const train = s.step === 'summary';
     if (coach()) list.push({ id: coach().id, x: Math.min(m.x + 3.5, 11.4), z: m.z + 1, busy: train });
-    s.fighters.forEach((f, i) => list.push({ id: f.id, x: m.x + 0.9 + i * 1.2, z: m.z + 1.1 - i * 0.25, busy: train }));
+    s.fighters.forEach((f, i) => list.push({ id: f.id, x: m.x + 0.6 + i * 0.95, z: m.z + 1.2 - (i % 2) * 0.5, busy: train }));
   }
   return list;
 }
@@ -79,10 +80,10 @@ function render() {
   let speaker = 'rin', line = '';
 
   // which backdrop
-  const onStage = s.step === 'intro' || s.step === 'locations' || s.step === 'fight' || s.step === 'result';
-  stage.hidden = !onStage; stage.classList.toggle('dimmed', s.step === 'locations' || s.step === 'result');
+  const onStage = ['intro', 'locations', 'weighin', 'fight', 'result'].includes(s.step);
+  stage.hidden = !onStage; stage.classList.toggle('dimmed', s.step === 'locations' || s.step === 'result' || s.step === 'weighin');
   const showF = s.step === 'fight' || s.step === 'result'; $('app').classList.toggle('fighting', showF); $('fA').hidden = $('fB').hidden = !showF;
-  if (showF && s.fight) ($('fA') as HTMLImageElement).src = ALL_SPRITES[s.fight.fighterId];
+  if (showF && s.fight) { ($('fA') as HTMLImageElement).src = ALL_SPRITES[s.fight.fighterId]; ($('fB') as HTMLImageElement).src = ALL_SPRITES[s.fight.opponentId]; }
   if (!busy) { stage.classList.toggle('idle', showF); stage.classList.remove('clash'); }
 
   switch (s.step) {
@@ -125,7 +126,7 @@ function render() {
       body.append(h('div', { cls: 'cards' }, ...G.PROSPECTS.map(p => {
         const e = G.estimate(s, p.id), signed = s.fighters.some(f => f.id === p.id), no = s.declined.includes(p.id);
         return h('div', { cls: 'card' }, title(p.name, p.id),
-          kv([[T('age'), String(p.age)], [T('weight'), p.weightKg + ' kg'], [T('style'), T('style_' + p.style)], [T('record'), p.record], [T('origin'), p.origin],
+          kv([[T('age'), String(p.age)], [T('weightClass'), `${p.weightKg} kg · ${T('div_' + p.sex)}`], [T('walk'), num(lang, p.walkKg) + ' kg'], [T('style'), T('style_' + p.style)], [T('record'), p.record], [T('origin'), p.origin],
             [T('potential'), `${e.low}–${e.high}`], [T('confidence'), T('conf_' + e.confidence)]]),
           kv([[T('payNow'), B(p.signing)], [T('monthly'), B(p.stipend)], [T('purseAsk'), p.purseSharePct + '%'], [T('after'), B(s.cash - p.signing), 'gold']]),
           signed ? h('p', { cls: 'ok' }, T('signed')) : no ? h('p', { cls: 'no' }, T('refused_' + p.id)) :
@@ -155,25 +156,38 @@ function render() {
       btn(T('summaryBtn'), () => commit(G.seeOffer(s))); break;
     }
     case 'offer': {
-      speaker = coach().id; const f = G.offeredFighter(s), name = G.nameOf(f.id), c = s.contracts.find(c => c.fighterId === f.id)!;
+      speaker = coach().id; const f = G.offeredFighter(s), name = G.nameOf(f.id), c = s.contracts.find(c => c.fighterId === f.id)!, o = G.opponentFor(f.id), pr = G.PROSPECTS.find(p => p.id === f.id)!;
       if (!G.fighterAccepts(f)) { line = T('offerTired', { name }); btn(T('restBtn'), () => commit(G.restDay(s))); break; }
       const lose = G.settlementPreview(s, false), win = G.settlementPreview(s, true);
       line = T('offer1', { n: G.TUNING.fightInDays, name });
-      body.append(kv([[T('opponent'), `${G.OPPONENT.name} (${G.OPPONENT.record})`], [T('purse'), B(lose.purse)], [T('winBonus'), B(G.TUNING.winBonus)],
+      body.append(kv([[T('opponent'), `${o.name} (${o.record})`], [T('weightClass'), `${pr.weightKg} kg · ${T('div_' + pr.sex)}`], [T('purse'), B(lose.purse)], [T('winBonus'), B(G.TUNING.winBonus)],
         [T('athleteShare', { n: name, p: c.purseSharePct }), B(lose.share)], [T('travel'), B(-lose.travel)],
         [T('netLose'), B(lose.net), lose.net < 0 ? 'red' : 'gold'], [T('netWin'), B(win.net), 'gold'],
         [T('nextWages'), `${B(G.monthlyPayroll(s))} · ${T('day')} ${G.TUNING.wageDay}`, 'red'], [T('after'), B(s.cash + lose.net)]]));
       btn(T('accept'), () => { const r = G.acceptOffer(state); if (r.ok) commit(r.state); }); btn(T('decline'), () => commit(G.declineOffer(s)), 'ghost'); break;
     }
-    case 'prefight': speaker = coach().id; line = T('prefight', { n: s.fight!.day, name: G.nameOf(s.fight!.fighterId) }); btn(T('prefightBtn'), () => commit(G.goToFight(s))); break;
+    case 'prefight': {
+      speaker = coach().id; const f = s.fight!, name = G.nameOf(f.fighterId), pr = G.PROSPECTS.find(p => p.id === f.fighterId)!;
+      const pct = (x: number) => Math.round(x * 100) + '%';
+      line = T('prefight', { n: f.day, kg: f.limitKg, walk: num(lang, pr.walkKg), name });
+      body.append(h('p', { cls: 'lbl' }, T('missRisk')), kv([[T('withSupport', { v: B(G.TUNING.weighSupport) }), pct(G.missWeightChance(s, true)), 'gold'], [T('noSupport'), pct(G.missWeightChance(s, false)), 'red']]),
+        h('p', { cls: 'small' }, T('missNote', { p: G.TUNING.weighFinePct })));
+      btn(T('weighA'), () => { const r = G.goToWeighIn(state, true); if (r.ok) commit(r.state); }, '', s.cash < G.TUNING.weighSupport);
+      btn(T('weighB'), () => { const r = G.goToWeighIn(state, false); if (r.ok) commit(r.state); }, 'ghost'); break;
+    }
+    case 'weighin': {
+      speaker = coach().id; const f = s.fight!, w = f.weighIn!, name = G.nameOf(f.fighterId);
+      line = w.made ? T('weighMade', { name, kg: f.limitKg }) : T('weighMissed', { name, over: num(lang, w.overKg), fine: B(w.fine), opp: G.opponentOf(f).name });
+      btn(T('enterRing'), () => commit(G.enterRing(s))); break;
+    }
     case 'fight': { speaker = coach().id; line = renderFight(body, btn); break; }
     case 'result': {
       speaker = coach().id; const f = s.fight!, name = G.nameOf(f.fighterId), c = s.contracts.find(c => c.fighterId === f.fighterId)!;
       line = T('res_' + f.outcome, { name });
-      const tb = h('table', { cls: 'cardsT' }, h('tr', {}, h('th', {}, ''), h('th', {}, name), h('th', {}, G.OPPONENT.name)), ...f.totals.map((x, i) => h('tr', {}, h('td', {}, T('judge', { n: i + 1 })), h('td', {}, String(x[0])), h('td', {}, String(x[1])))));
-      const purse = f.purse + (f.outcome === 'win' ? f.winBonus : 0), share = Math.round(purse * c.purseSharePct / 100), net = purse - share - f.travel;
-      body.append(tb, h('p', { cls: 'lbl' }, T('settlement')), kv([[T('purse'), B(purse)], [T('athleteShare', { n: name, p: c.purseSharePct }), B(-share)], [T('travel'), B(-f.travel)], [T('net'), B(net), net < 0 ? 'red' : 'gold']]));
-      if (f.bets.length) body.append(h('p', { cls: 'small' }, `${T('betResult', { v: num(lang, G.betPayout(f)) })} · ${T('credits')}: ${num(lang, s.credits)}`));
+      const tb = h('table', { cls: 'cardsT' }, h('tr', {}, h('th', {}, ''), h('th', {}, name), h('th', {}, G.opponentOf(f).name)), ...f.totals.map((x, i) => h('tr', {}, h('td', {}, T('judge', { n: i + 1 })), h('td', {}, String(x[0])), h('td', {}, String(x[1])))));
+      const purse = f.purse + (f.outcome === 'win' ? f.winBonus : 0), share = Math.round(purse * c.purseSharePct / 100), fine = f.weighIn?.fine ?? 0, net = purse - share - f.travel - fine;
+      body.append(tb, h('p', { cls: 'lbl' }, T('settlement')), kv([[T('purse'), B(purse)], [T('athleteShare', { n: name, p: c.purseSharePct }), B(-share)], [T('travel'), B(-f.travel)], ...(fine ? [[T('weightFine'), B(-fine), 'red'] as [string, string, string]] : []), [T('net'), B(net), net < 0 ? 'red' : 'gold']]));
+      if (f.bets.length) body.append(h('p', { cls: 'small' }, T('betResult', { stake: B(f.bets.reduce((a, b) => a + b.stake, 0)), back: B(G.betPayout(f)) })));
       btn(T('resultBtn'), () => commit(G.finish(s))); break;
     }
     case 'end': {
@@ -194,7 +208,7 @@ function render() {
 }
 
 function renderFight(body: HTMLElement, btn: (label: string, fn: () => void, cls?: string, disabled?: boolean) => HTMLButtonElement): string {
-  const s = state, f = s.fight!, name = G.nameOf(f.fighterId), opp = G.OPPONENT.name, last = f.log[f.log.length - 1], n = f.log.length;
+  const s = state, f = s.fight!, name = G.nameOf(f.fighterId), opp = G.opponentOf(f).name, last = f.log[f.log.length - 1], n = f.log.length;
   const v = { name, opp }; let line: string;
   if (!last) line = `${T('preFight', v)} ${T('crowdLine', { a: f.attendance, c: f.capacity, name })}`;
   else {
@@ -209,7 +223,7 @@ function renderFight(body: HTMLElement, btn: (label: string, fn: () => void, cls
     const lead = f.log.reduce((a, l) => a + l.margin, 0);
     body.append(h('p', { cls: 'small' }, `${T(lead > 6 ? 'corner_ahead' : lead < -6 ? 'corner_behind' : 'corner_even')} ${T('crowd_' + last.crowd, v)}`));
   }
-  body.append(kv([[T('odds', { name }), f.odds.toFixed(2), 'gold'], ...(s.adultBetting ? [[T('credits'), num(L(), s.credits)] as [string, string]] : [])]));
+  body.append(kv([[T('odds', { name }), f.odds.toFixed(2), 'gold']]));
   if (f.outcome) { btn(T('hear'), () => commit(G.settleFight(state))); return line; }
   // corner instruction for the coming round
   body.append(h('p', { cls: 'lbl' }, T('nextIns')), h('div', { cls: 'seg' }, ...(['keep', 'conserve', 'pace'] as Instruction[]).map(k =>
@@ -219,8 +233,8 @@ function renderFight(body: HTMLElement, btn: (label: string, fn: () => void, cls
   body.append(h('label', { cls: 'toggle' }, tog, T('betOff')));
   if (s.adultBetting) {
     const mine = f.bets.find(b => b.afterRound === n);
-    body.append(mine ? h('p', { cls: 'ok' }, T('betPlaced', { v: mine.stake, o: mine.odds.toFixed(2) })) :
-      h('div', { cls: 'seg' }, ...[50, 100, 200].map(st => h('button', { textContent: T('bet', { v: st }), disabled: st > s.credits, onclick: () => { if (busy) return; const r = G.placeBet(state, st); if (r.ok) commit(r.state); } }))),
+    body.append(mine ? h('p', { cls: 'ok' }, T('betPlaced', { v: B(mine.stake), o: mine.odds.toFixed(2) })) :
+      h('div', { cls: 'seg' }, ...[500, 1000, 2000].map(st => h('button', { textContent: T('bet', { v: B(st) }), disabled: st > s.cash, onclick: () => { if (busy) return; const r = G.placeBet(state, st); if (r.ok) commit(r.state); } }))),
       h('p', { cls: 'small' }, T('betNote')));
   }
   btn(T('gong', { n: n + 1 }), () => {

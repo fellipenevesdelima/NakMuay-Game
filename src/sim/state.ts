@@ -3,7 +3,7 @@
 export type Lang = 'pt' | 'en' | 'th';
 export type Step =
   | 'intro' | 'locations' | 'gate' | 'walk' | 'place' | 'coach' | 'scout' | 'away' | 'report' | 'roster'
-  | 'school' | 'morning' | 'summary' | 'offer' | 'prefight' | 'fight' | 'result' | 'end';
+  | 'school' | 'morning' | 'summary' | 'offer' | 'prefight' | 'weighin' | 'fight' | 'result' | 'end';
 export type School = 'balanced' | 'technical' | 'clinch';
 export type Instruction = 'keep' | 'conserve' | 'pace';
 
@@ -17,25 +17,27 @@ export interface ScoutTrip { tripId: string; returnDay: number; }
 export interface SessionLine { fighterId: string; activity: 'pads' | 'clinch' | 'rope'; gains: Partial<Record<'tech' | 'clinch' | 'power' | 'cardio', number>>; fatigue: number; }
 export interface RoundLog { round: number; instruction: Instruction; margin: number; cards: [number, number][]; energy: number; oppEnergy: number; crowd: 'ours' | 'even' | 'theirs'; odds: number; }
 export interface Bet { afterRound: number; stake: number; odds: number; }
+export interface WeighIn { supported: boolean; made: boolean; overKg: number; fine: number; }
 export interface Fight {
-  fighterId: string; day: number; rounds: number; purse: number; winBonus: number; travel: number;
+  fighterId: string; opponentId: string; limitKg: number; weighIn: WeighIn | null; day: number; rounds: number; purse: number; winBonus: number; travel: number;
   capacity: number; attendance: number; rng: number; energy: number; oppEnergy: number;
   log: RoundLog[]; next: Instruction; bets: Bet[]; odds: number; delegated: boolean;
   outcome: 'win' | 'loss' | 'draw' | null; settled: boolean; totals: [number, number][];
 }
 export interface GameState {
-  saveVersion: 3; day: number; region: 'bangkok' | null; cash: number; debt: number; debtDueDay: number;
+  saveVersion: 4; day: number; region: 'bangkok' | null; cash: number; debt: number; debtDueDay: number;
   morale: number; prestige: number; step: Step; facilities: Facility[]; ledger: LedgerEntry[]; lang: Lang;
   staff: Staff[]; fighters: Fighter[]; contracts: Contract[]; scout: ScoutTrip | null; declined: string[];
   school: School | null; lastSession: SessionLine[]; sessions: number; fight: Fight | null;
-  credits: number; adultBetting: boolean;
+  adultBetting: boolean;
 }
 
 export const TUNING = {
   startCash: 300_000, loan: 250_000, loanDueDay: 30, wageDay: 30,
   matCost: 8_000, matW: 3, matD: 2,
   purse: 6_000, winBonus: 3_000, travel: 800, fightInDays: 3,
-  betCredits: 1_000, betCapPerRound: 200,   // fictional credits: no purchase, no withdrawal, no prize
+  betCapPerRound: 2_000,      // bets use the camp's own fictional baht: a real risk to the runway
+  weighSupport: 600, weighFinePct: 20,
 };
 export const REGIONS = [
   { id: 'bangkok' as const, price: 190_000, open: true },
@@ -58,10 +60,10 @@ export type BuyResult = Result;
 
 export function newGame(lang: Lang = 'pt'): GameState {
   return {
-    saveVersion: 3, day: 1, region: null, cash: TUNING.startCash, debt: TUNING.loan, debtDueDay: TUNING.loanDueDay,
+    saveVersion: 4, day: 1, region: null, cash: TUNING.startCash, debt: TUNING.loan, debtDueDay: TUNING.loanDueDay,
     morale: 50, prestige: 5, step: 'intro', facilities: [], ledger: [], lang,
     staff: [], fighters: [], contracts: [], scout: null, declined: [],
-    school: null, lastSession: [], sessions: 0, fight: null, credits: TUNING.betCredits, adultBetting: true,
+    school: null, lastSession: [], sessions: 0, fight: null, adultBetting: true,
   };
 }
 const move = (s: GameState, amount: number, sourceType: string, recipient: string): GameState => ({
@@ -103,7 +105,7 @@ export function buyMat(s: GameState, x: number, z: number): Result {
 // ---- Scene 3: first coach -------------------------------------------------
 export const COACHES = [
   { id: 'somchai', name: 'Kru Somchai', specialty: 'pads' as const, signing: 6_000, wage: 14_000 },
-  { id: 'dao', name: 'Kru Dao', specialty: 'clinch' as const, signing: 9_000, wage: 18_000 },
+  { id: 'daeng', name: 'Kru Daeng', specialty: 'clinch' as const, signing: 9_000, wage: 18_000 },
 ];
 export function hireCoach(s: GameState, id: string): Result {
   if (s.step !== 'coach') return { ok: false, reason: 'step' };
@@ -118,11 +120,20 @@ export const TRIPS = [
   { id: 'camp', days: 1, cost: 2_500, source: 'training' as const },
   { id: 'fair', days: 3, cost: 4_500, source: 'fight' as const },
 ];
+// Most of the talent pool is male, as in the real circuit. `walkKg` is everyday weight; `weightKg` is the fighting class.
 export const PROSPECTS = [
-  { id: 'mali', name: 'Mali', age: 22, weightKg: 54, style: 'femur', record: '14-5', origin: 'Buriram', signing: 12_000, stipend: 6_000, purseSharePct: 60, potential: 78, needsClinchCoach: false, tech: 62, clinch: 40, power: 45, cardio: 58 },
-  { id: 'niran', name: 'Niran', age: 24, weightKg: 61, style: 'khao', record: '9-4', origin: 'Khon Kaen', signing: 8_000, stipend: 5_000, purseSharePct: 55, potential: 72, needsClinchCoach: true, tech: 44, clinch: 63, power: 55, cardio: 60 },
+  { id: 'niran', name: 'Niran', sex: 'm' as const, age: 24, weightKg: 61, walkKg: 63, style: 'khao', record: '9-4', origin: 'Khon Kaen', signing: 8_000, stipend: 5_000, purseSharePct: 55, potential: 72, needsClinchCoach: true, tech: 44, clinch: 63, power: 55, cardio: 60 },
+  { id: 'petch', name: 'Petch', sex: 'm' as const, age: 21, weightKg: 57, walkKg: 60.5, style: 'mat', record: '11-6', origin: 'Korat', signing: 7_000, stipend: 5_000, purseSharePct: 50, potential: 70, needsClinchCoach: false, tech: 50, clinch: 42, power: 64, cardio: 54 },
+  { id: 'mali', name: 'Mali', sex: 'f' as const, age: 22, weightKg: 54, walkKg: 56, style: 'femur', record: '14-5', origin: 'Buriram', signing: 12_000, stipend: 6_000, purseSharePct: 60, potential: 78, needsClinchCoach: false, tech: 62, clinch: 40, power: 45, cardio: 58 },
 ];
-export const nameOf = (id: string) => PROSPECTS.find(p => p.id === id)?.name ?? COACHES.find(c => c.id === id)?.name ?? id;
+/** Bouts are always same-sex and at the athlete's weight class. */
+export const OPPONENTS = {
+  m: { id: 'kaew', name: 'Kaew', tech: 50, clinch: 50, power: 52, cardio: 56, record: '11-7' },
+  f: { id: 'fah', name: 'Fah', tech: 54, clinch: 46, power: 46, cardio: 57, record: '10-6' },
+};
+export const opponentFor = (fighterId: string) => OPPONENTS[PROSPECTS.find(p => p.id === fighterId)?.sex ?? 'm'];
+export const opponentOf = (f: Fight) => Object.values(OPPONENTS).find(o => o.id === f.opponentId) ?? OPPONENTS.m;
+export const nameOf = (id: string) => PROSPECTS.find(p => p.id === id)?.name ?? COACHES.find(c => c.id === id)?.name ?? Object.values(OPPONENTS).find(o => o.id === id)?.name ?? id;
 /** What Rin could actually judge: a watched fight narrows the estimate, training alone does not. */
 export function estimate(s: GameState, prospectId: string) {
   const p = PROSPECTS.find(p => p.id === prospectId)!; const trip = TRIPS.find(t => t.id === s.scout?.tripId);
@@ -190,7 +201,6 @@ export function runMorning(s: GameState): GameState {
 }
 
 // ---- Scene 7: the next need, the first offer --------------------------------
-export const OPPONENT = { id: 'kaew', name: 'Kaew', tech: 50, clinch: 50, power: 52, cardio: 56, record: '11-7' };
 export function seeOffer(s: GameState): GameState { return s.step === 'summary' ? { ...s, step: 'offer' } : s; }
 export const offeredFighter = (s: GameState) => [...s.fighters].sort((a, b) => a.fatigue - b.fatigue)[0];
 /** The athlete must agree to compete; an exhausted athlete says no. */
@@ -207,7 +217,7 @@ export function acceptOffer(s: GameState): Result {
   if (s.cash < TUNING.travel) return { ok: false, reason: 'cash' };
   const seed = (s.ledger.length * 7919 + s.day * 104729 + f.tech * 31 + f.clinch * 17 + s.sessions * 53) >>> 0;
   return { ok: true, state: { ...s, step: 'prefight', fight: {
-    fighterId: f.id, day: s.day + TUNING.fightInDays, rounds: 5, purse: TUNING.purse, winBonus: TUNING.winBonus, travel: TUNING.travel,
+    fighterId: f.id, opponentId: opponentFor(f.id).id, limitKg: PROSPECTS.find(p => p.id === f.id)!.weightKg, weighIn: null, day: s.day + TUNING.fightInDays, rounds: 5, purse: TUNING.purse, winBonus: TUNING.winBonus, travel: TUNING.travel,
     capacity: 120, attendance: 38, rng: seed || 1, energy: 100, oppEnergy: 100, log: [], next: 'keep', bets: [], odds: 2, delegated: false,
     outcome: null, settled: false, totals: [],
   } } };
@@ -217,12 +227,30 @@ export function declineOffer(s: GameState): GameState { return s.step === 'offer
 export function restDay(s: GameState): GameState {
   return s.step === 'offer' ? { ...s, day: s.day + 1, fighters: s.fighters.map(f => ({ ...f, fatigue: Math.max(0, f.fatigue - 40) })) } : s;
 }
-export function goToFight(s: GameState): GameState {
-  if (s.step !== 'prefight' || !s.fight) return s;
+/**
+ * Chance of missing weight at the official weigh-in. A bigger gap between everyday and fighting weight and a tired
+ * athlete raise it; a nutrition adviser lowers it. The game never models or rewards dehydration methods.
+ */
+export function missWeightChance(s: GameState, supported: boolean): number {
+  const f = s.fight; if (!f) return 0; const p = PROSPECTS.find(p => p.id === f.fighterId)!; const me = s.fighters.find(x => x.id === f.fighterId)!;
+  const c = 0.04 + (p.walkKg - p.weightKg) * 0.035 + me.fatigue / 400 - (supported ? 0.09 : 0);
+  return Math.round(Math.min(0.6, Math.max(0.02, c)) * 100) / 100;
+}
+export function goToWeighIn(s: GameState, supported: boolean): Result {
+  if (s.step !== 'prefight' || !s.fight) return { ok: false, reason: 'step' };
+  if (supported && s.cash < TUNING.weighSupport) return { ok: false, reason: 'cash' };
+  let n = supported ? spend(s, TUNING.weighSupport, 'nutrition', 'adviser') : s;
   const days = Math.max(0, s.fight.day - s.day);
-  const fighters = s.fighters.map(f => ({ ...f, fatigue: Math.max(0, f.fatigue - 12 * days) })); // taper and rest
-  const fight = { ...s.fight, odds: openingOdds({ ...s, fighters }) };
-  return { ...s, day: s.fight.day, fighters, fight, step: 'fight' };
+  const fighters = n.fighters.map(f => ({ ...f, fatigue: Math.max(0, f.fatigue - 12 * days) })); // taper and rest
+  n = { ...n, fighters, day: s.fight.day };
+  const [roll, seed] = rand(s.fight.rng); const [roll2, seed2] = rand(seed);
+  const made = roll >= missWeightChance(n, supported); const overKg = made ? 0 : Math.round((0.3 + roll2 * 1.2) * 10) / 10;
+  const fine = made ? 0 : Math.round(s.fight.purse * TUNING.weighFinePct / 100);
+  return { ok: true, state: { ...n, step: 'weighin', prestige: Math.max(0, n.prestige - (made ? 0 : 3)),
+    fight: { ...s.fight, rng: seed2, weighIn: { supported, made, overKg, fine }, energy: made ? 100 : 88 } } };
+}
+export function enterRing(s: GameState): GameState {
+  return s.step === 'weighin' && s.fight ? { ...s, step: 'fight', fight: { ...s.fight, odds: openingOdds(s) } } : s;
 }
 
 // ---- Fight night -----------------------------------------------------------
@@ -237,31 +265,34 @@ const INSTR = { keep: { mult: 1, cost: 14 }, conserve: { mult: 0.88, cost: 8 }, 
 const oddsFrom = (lead: number) => { const p = Math.min(0.85, Math.max(0.15, 1 / (1 + Math.exp(-lead / 22)))); return Math.max(1.05, Math.round((0.92 / p) * 100) / 100); };
 function openingOdds(s: GameState): number {
   const f = s.fighters.find(f => f.id === s.fight!.fighterId)!;
-  return oddsFrom((rating(f, 1) + rating(f, 4)) / 2 - (rating(OPPONENT, 1) + rating(OPPONENT, 4)) / 2);
+  const o = opponentOf(s.fight!);
+  return oddsFrom((rating(f, 1) + rating(f, 4)) / 2 - (rating(o, 1) + rating(o, 4)) / 2);
 }
 export function setInstruction(s: GameState, next: Instruction): GameState {
   return s.step === 'fight' && s.fight && !s.fight.outcome ? { ...s, fight: { ...s.fight, next } } : s;
 }
 /**
- * Fictional wagering, adult mode only. Credits are separate from camp cash and cannot be bought or cashed out.
+ * Wagering uses the camp's own fictional baht, so a bad night at the ring can cost a month of wages.
  * A bet never touches the fight engine: judges score from the action alone.
  */
 export function placeBet(s: GameState, stake: number): Result {
   const f = s.fight; if (s.step !== 'fight' || !f || f.outcome || !s.adultBetting) return { ok: false, reason: 'step' };
-  if (!Number.isInteger(stake) || stake <= 0 || stake > TUNING.betCapPerRound || stake > s.credits) return { ok: false, reason: 'limit' };
+  if (!Number.isInteger(stake) || stake <= 0 || stake > TUNING.betCapPerRound) return { ok: false, reason: 'limit' };
+  if (stake > s.cash) return { ok: false, reason: 'cash' };
   if (f.bets.some(b => b.afterRound === f.log.length)) return { ok: false, reason: 'limit' };
-  return { ok: true, state: { ...s, credits: s.credits - stake, fight: { ...f, bets: [...f.bets, { afterRound: f.log.length, stake, odds: f.odds }] } } };
+  const n = spend(s, stake, 'bet-stake', 'bookmaker');
+  return { ok: true, state: { ...n, fight: { ...f, bets: [...f.bets, { afterRound: f.log.length, stake, odds: f.odds }] } } };
 }
 export function setAdultBetting(s: GameState, on: boolean): GameState { return { ...s, adultBetting: on }; }
 
 /** Simulates only the next round, using the instruction chosen before it. */
 export function simulateRound(s: GameState): GameState {
   const ft = s.fight; if (s.step !== 'fight' || !ft || ft.outcome) return s;
-  const me = s.fighters.find(f => f.id === ft.fighterId)!; const round = ft.log.length + 1;
+  const me = s.fighters.find(f => f.id === ft.fighterId)!; const round = ft.log.length + 1; const OPPONENT = opponentOf(ft);
   let seed = ft.rng; const r = () => { const [v, n] = rand(seed); seed = n; return v; };
   const ins = INSTR[ft.next];
   const oppIns = round >= 3 && round <= 4 ? INSTR.pace : round === 5 ? INSTR.conserve : INSTR.keep; // traditional pacing
-  const eff = (a: typeof OPPONENT | Fighter, energy: number, mult: number, fatigue: number) =>
+  const eff = (a: { tech: number; clinch: number; power: number }, energy: number, mult: number, fatigue: number) =>
     rating(a, round) * (0.55 + 0.45 * energy / 100) * mult * (1 - fatigue / 250) + (r() - 0.5) * 16;
   const margin = eff(me, ft.energy, ins.mult, me.fatigue) - eff(OPPONENT, ft.oppEnergy, oppIns.mult, 0);
   const cards: [number, number][] = [0, 1, 2].map(() => {
@@ -300,11 +331,12 @@ export function settleFight(s: GameState): GameState {
   const c = s.contracts.find(c => c.fighterId === f.fighterId)!;
   const purse = f.purse + (f.outcome === 'win' ? f.winBonus : 0); const share = Math.round(purse * c.purseSharePct / 100);
   let n = move(s, purse, 'purse', 'promoter'); n = spend(n, share, 'purse-share', f.fighterId); n = spend(n, f.travel, 'travel', 'transport');
-  const payout = f.bets.reduce((a, b) => a + (f.outcome === 'win' ? Math.round(b.stake * b.odds) : f.outcome === 'draw' ? b.stake : 0), 0);
+  if (f.weighIn?.fine) n = spend(n, f.weighIn.fine, 'weight-fine', f.opponentId);
+  const payout = betPayout(f); if (payout) n = move(n, payout, 'bet-payout', 'bookmaker');
   const fighters = n.fighters.map(x => x.id !== f.fighterId ? x : { ...x, fatigue: Math.min(100, x.fatigue + 45),
     record: { w: x.record.w + (f.outcome === 'win' ? 1 : 0), l: x.record.l + (f.outcome === 'loss' ? 1 : 0), d: x.record.d + (f.outcome === 'draw' ? 1 : 0) } });
   const d = f.outcome === 'win' ? 1 : f.outcome === 'loss' ? -1 : 0;
-  return { ...n, fighters, credits: n.credits + payout, fight: { ...f, settled: true }, step: 'result',
+  return { ...n, fighters, fight: { ...f, settled: true }, step: 'result',
     prestige: Math.max(0, Math.min(100, n.prestige + 2 + d * 3)), morale: Math.max(0, Math.min(100, n.morale + d * 8)) };
 }
 export function betPayout(f: Fight): number {
@@ -320,9 +352,14 @@ export function migrate(raw: any): GameState | null {
   if (s.saveVersion === 1) s = { ...s, saveVersion: 2, step: s.step === 'placed' ? 'coach' : s.step, staff: [], fighters: [], contracts: [], scout: null, declined: [] };
   if (s.saveVersion === 2) {
     const fighters = (s.fighters as any[]).map(f => { const p = PROSPECTS.find(p => p.id === f.id)!; const [w, l] = p.record.split('-').map(Number); return { tech: p.tech, clinch: p.clinch, power: p.power, cardio: p.cardio, fatigue: 0, record: { w, l, d: 0 }, ...f }; });
-    s = { ...s, saveVersion: 3, fighters, school: null, lastSession: [], sessions: 0, fight: null, credits: TUNING.betCredits, adultBetting: false };
+    s = { ...s, saveVersion: 3, fighters, school: null, lastSession: [], sessions: 0, fight: null, adultBetting: true };
   }
-  return s.saveVersion === 3 ? s as GameState : null;
+  if (s.saveVersion === 3) {
+    const { credits: _c, ...rest } = s; const id = (x: string) => (x === 'dao' ? 'daeng' : x);
+    const fight = s.fight ? { opponentId: opponentFor(s.fight.fighterId).id, limitKg: PROSPECTS.find(p => p.id === s.fight.fighterId)!.weightKg, weighIn: null, ...s.fight, bets: [] } : null;
+    s = { ...rest, saveVersion: 4, staff: s.staff.map((c: any) => ({ ...c, id: id(c.id) })), fight };
+  }
+  return s.saveVersion === 4 ? s as GameState : null;
 }
 const KEY = 'nakmuay-save-v1';
 export function save(s: GameState): void { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* storage unavailable */ } }
