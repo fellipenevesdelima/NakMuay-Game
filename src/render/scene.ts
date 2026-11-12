@@ -76,7 +76,7 @@ export class CampScene {
   private ghost: THREE.Mesh | null = null; private ghostMat = new THREE.MeshBasicMaterial({ color: '#f0e5cd', transparent: true, opacity: 0.5, depthTest: false });
   private rain!: THREE.LineSegments;
   private actors = new Map<string, Actor>();
-  private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Mesh>(); private mats: Facility[] = []; private turn = -1;
+  private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Mesh>(); private mats: Facility[] = []; private turn = -1; private glowTex!: THREE.Texture; private spark!: THREE.Mesh; private moths!: THREE.Points;
   private matTex = load(matUrl);
   private clock = new THREE.Clock(); private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   private unitsPerPx = 1; private view = { x: 0, y: 0 };
@@ -103,8 +103,12 @@ export class CampScene {
     // warm flicker around the fluorescent tube
     const gc = document.createElement('canvas'); gc.width = gc.height = 64; const c = gc.getContext('2d')!; const gr = c.createRadialGradient(32, 32, 2, 32, 32, 32);
     gr.addColorStop(0, 'rgba(255,214,150,.9)'); gr.addColorStop(1, 'rgba(255,214,150,0)'); c.fillStyle = gr; c.fillRect(0, 0, 64, 64);
-    this.glow = new THREE.Mesh(new THREE.PlaneGeometry(190, 110), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(gc), transparent: true, blending: THREE.AdditiveBlending, depthTest: false }));
+    this.glow = new THREE.Mesh(new THREE.PlaneGeometry(190, 110), new THREE.MeshBasicMaterial({ map: (this.glowTex = new THREE.CanvasTexture(gc)), transparent: true, blending: THREE.AdditiveBlending, depthTest: false }));
     this.glow.position.copy(P(618, 318)); this.glow.renderOrder = 6000; s.add(this.glow);
+    // the pop of glove on pad, and moths circling the tube
+    this.spark = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshBasicMaterial({ map: this.glowTex, transparent: true, blending: THREE.AdditiveBlending, depthTest: false })); this.spark.renderOrder = 6400; this.spark.visible = false; s.add(this.spark);
+    const mg = new THREE.BufferGeometry(); mg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(8 * 3), 3));
+    this.moths = new THREE.Points(mg, new THREE.PointsMaterial({ color: '#ffe9b0', size: 2.2, transparent: true, opacity: 0.85, depthTest: false })); this.moths.renderOrder = 6500; s.add(this.moths);
     // darkness while the camp is still locked
     this.night = new THREE.Mesh(new THREE.PlaneGeometry(IMG * 3, IMG * 3), new THREE.MeshBasicMaterial({ color: '#070a12', transparent: true, opacity: 0.6, depthTest: false }));
     this.night.position.copy(P(IMG / 2, IMG / 2)); this.night.renderOrder = 7000; s.add(this.night);
@@ -242,6 +246,9 @@ export class CampScene {
     const nm = this.night.material as THREE.MeshBasicMaterial; nm.opacity += ((1 - lit) * 0.6 - nm.opacity) * Math.min(1, dt * 6);
     (this.glow.material as THREE.MeshBasicMaterial).opacity = lit * (0.16 + (this.reduced ? 0 : Math.sin(time * 13) * 0.03 + Math.sin(time * 2.1) * 0.03));
     for (const m of this.built.values()) { const mat = m.material as THREE.MeshBasicMaterial; if (mat.opacity < 1) mat.opacity = Math.min(1, mat.opacity + dt * 1.6); }
+    this.spark.visible = false; this.moths.visible = lit > 0;
+    if (!this.reduced) { const mp = this.moths.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < mp.count; i++) { const a = time * (0.9 + i * 0.23) + i * 2.1; mp.setXYZ(i, 618 + Math.cos(a) * (18 + i * 5) + Math.sin(a * 2.3) * 6, -(316 + Math.sin(a * 1.4) * (9 + i * 2)), 0); } mp.needsUpdate = true; }
     const turn = Math.floor(time / (CYCLE * TURN)); if (turn !== this.turn) { this.turn = turn; this.assign(); }
     for (const a of this.actors.values()) {
       let moving = false;
@@ -258,7 +265,8 @@ export class CampScene {
         // one clock for the two of them: the strike and the pad land on the same frame, then both reset
         a.flip = partner.pos[0] > a.pos[0];
         const p = ((time * job.clock) % CYCLE) / CYCLE, hit = p < STRIKE, f = hit ? p / STRIKE * 8 : 0;
-        if (a.spec.role === 'coach') this.show(a, SHEETS[a.id + '_work'] ? a.id + '_work' : a.id, f);
+        if (a.spec.role === 'coach') { this.show(a, SHEETS[a.id + '_work'] ? a.id + '_work' : a.id, f);
+          if (hit && f >= 3 && f < 5 && !this.reduced) { this.spark.visible = true; this.spark.position.copy(P((a.pos[0] + partner.pos[0]) / 2, (a.pos[1] + partner.pos[1]) / 2 - 34)); this.spark.scale.setScalar(0.7 + (f - 3) * 0.5); } }
         else this.show(a, hit && SHEETS[a.id + '_attack'] ? a.id + '_attack' : SHEETS[a.id + '_guard'] ? a.id + '_guard' : a.id, hit ? f : time * 7);
       } else if (job?.kind === 'solo') {
         // shadow-boxing alone, each in their own time, turned towards the pads

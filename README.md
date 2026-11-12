@@ -34,6 +34,9 @@ Fatia 1 do redesign (temporada jogável no nível 1). O jogo não está completo
 - Folha mensal, parcela da dívida, patrocínio, teto de caixa por nível, fim de temporada.
 - Torcida, Respeito e Clima no topo. Regras de balanceamento em `src/sim/balance.ts`.
 
+- Noite de luta viva: torcida na lotação simulada reagindo ao round, árbitro, córner, banda e apostadores, nocaute com cena própria (`src/stadium.ts`). A torcida só lê a simulação.
+- Topo em uma linha, cores fixas por recurso e atributo, menu em painel com seis ícones.
+
 **Parcial**
 - Turistas: vagas, preço, procura e carga funcionam; ainda não aparecem no cenário.
 - Subida para o nível 2: requisitos e cobrança funcionam; pintura nova, obra e andaimes não existem.
@@ -42,6 +45,8 @@ Fatia 1 do redesign (temporada jogável no nível 1). O jogo não está completo
 - Uma luta em preparação por vez.
 
 **Falta**
+- Entrada e Wai Kru, cena de córner no intervalo, os outros quatro tipos de estádio, som gravado (o ruído de torcida é sintetizado).
+- Roteiro novo de abertura (escrito, aguardando aprovação).
 - Circuitos de estádio, 3 rounds e internacional. Apostas de arquibancada com cotação viva.
 - Subida de categoria, ex-lutador virando treinador, níveis 3 a 5, Phuket e Chiang Mai.
 - Som (ElevenLabs), eventos narrativos, revisão do tailandês por falante nativo.

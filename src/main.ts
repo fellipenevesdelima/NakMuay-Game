@@ -4,6 +4,7 @@ import * as G from './sim/state';
 import type { GameState, Instruction, School } from './sim/state';
 import { baht, nextLang, num, t } from './i18n';
 import { SHEETS } from './assets/anim';
+import { Stadium, type React } from './stadium';
 import ringUrl from './assets/ring.webp';
 import kaewUrl from './assets/kaew.webp';
 import fahUrl from './assets/fah.webp';
@@ -22,6 +23,7 @@ const scene = new CampScene(canvas);
 const stage = $('stage'); const LOC_IMG: Record<string, string> = { bangkok: locBangkok, phuket: locPhuket, chiangmai: locChiangmai };
 const ALL_SPRITES: Record<string, string> = { ...SPRITES, kaew: kaewUrl, fah: fahUrl };
 ($('stageImg') as HTMLImageElement).src = ringUrl;
+const stadium = new Stadium(stage);
 
 let state: GameState = G.load() ?? G.newGame();
 let ghost: { x: number; z: number } | null = null; let pinned = false; let warn = false; let busy = false; let first = true;
@@ -135,8 +137,18 @@ function render() {
   stage.hidden = !onStage; stage.classList.toggle('dimmed', s.step === 'locations' || s.step === 'result' || s.step === 'weighin');
   const showF = s.step === 'fight' || s.step === 'result'; $('app').classList.toggle('fighting', showF); $('app').classList.toggle('hub', s.step === 'hub' || s.step === 'camp'); $('fA').hidden = $('fB').hidden = !showF;
   if (showF && s.fight && !busy) { fighterAnim($('fA'), G.lookOf(s.fight.fighterId) + '_guard', true); fighterAnim($('fB'), s.fight.opp.look + '_guard', false); }
-  if (!busy) { stage.classList.toggle('idle', showF); stage.classList.remove('clash'); }
+  if (!busy) { stage.classList.toggle('idle', showF); stage.classList.remove('clash'); stadium.clash('even', false); }
+  // the venue: stands filled to the simulated attendance, heat following the round
+  if (showF && s.fight) {
+    const f = s.fight; stadium.open(`${f.fighterId}-${f.opp.id}-${f.day}`, f.attendance, f.capacity, f.day * 31 + f.attendance);
+    stadium.setRound(Math.min(f.rounds, f.log.length + 1), f.rounds);
+    const side = (o: typeof f.outcome): React | null => (o === 'win' ? 'ours' : o === 'loss' ? 'theirs' : null);
+    if (f.outcome && !busy) stadium.settle(side(f.outcome));
+    stage.classList.toggle('ko-win', f.ko && f.outcome === 'win'); stage.classList.toggle('ko-loss', f.ko && f.outcome === 'loss');
+    stage.classList.toggle('won', !!f.outcome && !f.ko && f.outcome === 'win'); stage.classList.toggle('lost', !!f.outcome && !f.ko && f.outcome === 'loss');
+  } else { stadium.close(); stage.classList.remove('ko-win', 'ko-loss', 'won', 'lost'); }
 
+  if (s.step !== 'hub' && s.step !== 'camp') delete $('drawer').dataset.tab;
   switch (s.step) {
     case 'intro': line = T('intro'); btn(T('introBtn'), () => commit(G.visitLocations(s))); break;
     case 'locations': {
@@ -287,7 +299,16 @@ function renderFight(body: HTMLElement, btn: (label: string, fn: () => void, cls
   btn(T('gong', { n: n + 1 }), () => {
     bell(); busy = true; stage.classList.remove('idle'); stage.classList.add('clash');
     fighterAnim($('fA'), G.lookOf(state.fight!.fighterId) + '_attack', true); setTimeout(() => fighterAnim($('fB'), state.fight!.opp.look + '_attack', false), 440); document.querySelectorAll<HTMLButtonElement>('#drawer button').forEach(b => (b.disabled = true));
-    setTimeout(() => { busy = false; commit(G.simulateRound(state)); }, reduced ? 0 : 1900);
+    // The round is already decided by the simulation; the venue only plays it back. The crowd reacts to its own noisy impression.
+    const next = G.simulateRound(state), nf = next.fight!, lastLog = nf.log[nf.log.length - 1];
+    stadium.clash(lastLog.crowd, true);
+    setTimeout(() => {
+      if (nf.ko && !reduced) {
+        stage.classList.remove('clash'); stage.classList.add(nf.outcome === 'win' ? 'ko-win' : 'ko-loss'); stadium.knockout(nf.outcome === 'win' ? 'ours' : 'theirs');
+        const k = h('div', { id: 'koBanner', textContent: 'K.O.' }); stage.append(k); setTimeout(() => k.remove(), 1900);
+        setTimeout(() => { busy = false; commit(next); }, 2000);
+      } else { busy = false; commit(next); }
+    }, reduced ? 0 : 1900);
   });
   btn(T('delegate'), () => commit(G.delegateRest(state)), 'ghost');
   return line;
@@ -311,6 +332,7 @@ const act = (r: G.Result) => { if (r.ok) commit(r.state); };
 function renderHub(body0: HTMLElement, btn: (label: string, fn: () => void, cls?: string, disabled?: boolean) => HTMLButtonElement): { line: string; speaker: string } {
   const s = state, lang = L(), f = s.fight, lv = G.LEVELS[s.level - 1]; let line = '', speaker = spk(), body = body0;
   const dots: Partial<Record<Tab, number>> = { offers: f ? 0 : s.offers.length, rin: s.candidates.length + s.sponsorOffers.length, coach: s.staff.length === 0 ? 1 : s.staff.filter(c => c.fatigue >= G.TRAINER.strainAt).length };
+  $('drawer').dataset.tab = tab;
   body.append(h('div', { cls: 'tabs' }, ...(['week', 'coach', 'roster', 'rin', 'offers', 'camp'] as Tab[]).map(k => { const b = h('button', { ariaPressed: String(tab === k), onclick: () => { tab = k; sure = null; render(); } } as any, icon(k) as any, T('tab_' + k), dots[k] ? h('span', { cls: 'dot' }, String(dots[k])) : null); b.dataset.tab = k; return b; })));
   const evName = (v: string | number) => (typeof v === 'number' ? v : G.SPONSORS.some(x => x.id === v) ? T('sp_' + v) : G.nameOf(v));
   const lifeBar = (x: G.Fighter) => h('div', { cls: 'life' + (x.life <= G.SEASON.lowLife ? ' low' : '') }, h('span', {}, `${T('lifeLbl')}: ${T('seasonsU', { a: num(lang, x.life), b: num(lang, x.lifeMax) })}`), h('i', {}, h('b', { style: `width:${x.life / x.lifeMax * 100}%` } as any)));
