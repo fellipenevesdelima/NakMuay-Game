@@ -3,7 +3,7 @@
 export type Lang = 'pt' | 'en' | 'th';
 export type Step =
   | 'intro' | 'locations' | 'gate' | 'walk' | 'place' | 'coach' | 'scout' | 'away' | 'report' | 'roster'
-  | 'school' | 'morning' | 'summary' | 'offer' | 'prefight' | 'weighin' | 'fight' | 'result' | 'end';
+  | 'school' | 'morning' | 'summary' | 'offer' | 'camp' | 'weighin' | 'fight' | 'result' | 'end';
 export type School = 'balanced' | 'technical' | 'clinch';
 export type Instruction = 'keep' | 'conserve' | 'pace';
 
@@ -17,15 +17,19 @@ export interface ScoutTrip { tripId: string; returnDay: number; }
 export interface SessionLine { fighterId: string; activity: 'pads' | 'clinch' | 'rope'; gains: Partial<Record<'tech' | 'clinch' | 'power' | 'cardio', number>>; fatigue: number; }
 export interface RoundLog { round: number; instruction: Instruction; margin: number; cards: [number, number][]; energy: number; oppEnergy: number; crowd: 'ours' | 'even' | 'theirs'; odds: number; }
 export interface Bet { afterRound: number; stake: number; odds: number; }
-export interface WeighIn { supported: boolean; made: boolean; overKg: number; fine: number; }
+export interface WeighIn { made: boolean; overKg: number; fine: number; chance: number; }
+export type WeekPlan = 'hard' | 'moderate' | 'light';
+export type FinalPlan = 'sharpen' | 'rest';
+export interface CampWeek { week: number; plan: WeekPlan | FinalPlan; by: 'player' | 'coach'; gains: Partial<Record<'tech' | 'clinch' | 'power' | 'cardio', number>>; fatigueAfter: number; }
 export interface Fight {
-  fighterId: string; opponentId: string; limitKg: number; weighIn: WeighIn | null; day: number; rounds: number; purse: number; winBonus: number; travel: number;
+  fighterId: string; opponentId: string; limitKg: number; weighIn: WeighIn | null; day: number;
+  campWeeks: number; campLog: CampWeek[]; wearBeforeFinal: number | null; rounds: number; purse: number; winBonus: number; travel: number;
   capacity: number; attendance: number; rng: number; energy: number; oppEnergy: number;
   log: RoundLog[]; next: Instruction; bets: Bet[]; odds: number; delegated: boolean;
   outcome: 'win' | 'loss' | 'draw' | null; settled: boolean; totals: [number, number][];
 }
 export interface GameState {
-  saveVersion: 4; day: number; region: 'bangkok' | null; cash: number; debt: number; debtDueDay: number;
+  saveVersion: 5; wageDay: number; day: number; region: 'bangkok' | null; cash: number; debt: number; debtDueDay: number;
   morale: number; prestige: number; step: Step; facilities: Facility[]; ledger: LedgerEntry[]; lang: Lang;
   staff: Staff[]; fighters: Fighter[]; contracts: Contract[]; scout: ScoutTrip | null; declined: string[];
   school: School | null; lastSession: SessionLine[]; sessions: number; fight: Fight | null;
@@ -35,9 +39,9 @@ export interface GameState {
 export const TUNING = {
   startCash: 300_000, loan: 250_000, loanDueDay: 30, wageDay: 30,
   matCost: 8_000, matW: 3, matD: 2,
-  purse: 6_000, winBonus: 3_000, travel: 800, fightInDays: 3,
+  purse: 6_000, winBonus: 3_000, travel: 800,
   betCapPerRound: 2_000,      // bets use the camp's own fictional baht: a real risk to the runway
-  weighSupport: 600, weighFinePct: 20,
+  weighFinePct: 20, campWeeks: 3,   // weeks of fight camp before the first bout; later offers may give 2 to 4
 };
 export const REGIONS = [
   { id: 'bangkok' as const, price: 190_000, open: true },
@@ -60,7 +64,7 @@ export type BuyResult = Result;
 
 export function newGame(lang: Lang = 'pt'): GameState {
   return {
-    saveVersion: 4, day: 1, region: null, cash: TUNING.startCash, debt: TUNING.loan, debtDueDay: TUNING.loanDueDay,
+    saveVersion: 5, wageDay: TUNING.wageDay, day: 1, region: null, cash: TUNING.startCash, debt: TUNING.loan, debtDueDay: TUNING.loanDueDay,
     morale: 50, prestige: 5, step: 'intro', facilities: [], ledger: [], lang,
     staff: [], fighters: [], contracts: [], scout: null, declined: [],
     school: null, lastSession: [], sessions: 0, fight: null, adultBetting: true,
@@ -216,8 +220,9 @@ export function acceptOffer(s: GameState): Result {
   if (!fighterAccepts(f)) return { ok: false, reason: 'tired' };
   if (s.cash < TUNING.travel) return { ok: false, reason: 'cash' };
   const seed = (s.ledger.length * 7919 + s.day * 104729 + f.tech * 31 + f.clinch * 17 + s.sessions * 53) >>> 0;
-  return { ok: true, state: { ...s, step: 'prefight', fight: {
-    fighterId: f.id, opponentId: opponentFor(f.id).id, limitKg: PROSPECTS.find(p => p.id === f.id)!.weightKg, weighIn: null, day: s.day + TUNING.fightInDays, rounds: 5, purse: TUNING.purse, winBonus: TUNING.winBonus, travel: TUNING.travel,
+  return { ok: true, state: { ...s, step: 'camp', fight: {
+    fighterId: f.id, opponentId: opponentFor(f.id).id, limitKg: PROSPECTS.find(p => p.id === f.id)!.weightKg, weighIn: null, day: s.day + TUNING.campWeeks * 7,
+    campWeeks: TUNING.campWeeks, campLog: [], wearBeforeFinal: null, rounds: 5, purse: TUNING.purse, winBonus: TUNING.winBonus, travel: TUNING.travel,
     capacity: 120, attendance: 38, rng: seed || 1, energy: 100, oppEnergy: 100, log: [], next: 'keep', bets: [], odds: 2, delegated: false,
     outcome: null, settled: false, totals: [],
   } } };
@@ -227,27 +232,75 @@ export function declineOffer(s: GameState): GameState { return s.step === 'offer
 export function restDay(s: GameState): GameState {
   return s.step === 'offer' ? { ...s, day: s.day + 1, fighters: s.fighters.map(f => ({ ...f, fatigue: Math.max(0, f.fatigue - 40) })) } : s;
 }
+// ---- Fight camp: one decision per week --------------------------------------
+/** Moves the calendar and pays wages when the pay day passes. A shortfall becomes debt, never negative cash. */
+export function advanceDays(s: GameState, days: number): GameState {
+  let n = { ...s, day: s.day + days };
+  while (n.day >= n.wageDay) {
+    const due = monthlyPayroll(n);
+    if (due > n.cash) { const gap = due - n.cash; n = { ...move(n, gap, 'emergency-loan', 'lender'), debt: n.debt + gap, morale: Math.max(0, n.morale - 6) }; }
+    n = { ...spend(n, due, 'payroll', 'staff-and-athletes'), wageDay: n.wageDay + 30 };
+  }
+  return n;
+}
+export const weeksLeft = (f: Fight) => f.campWeeks - f.campLog.length;
+const mainGain = (s: GameState, amount: number): CampWeek['gains'] => {
+  const fit = (k: 'pads' | 'clinch') => (s.staff[0]?.specialty === k ? 1.5 : 1);
+  if (s.school === 'clinch') return { clinch: Math.round(amount * fit('clinch')) };
+  if (s.school === 'technical') return { tech: Math.round(amount * fit('pads')) };
+  return amount >= 3 ? { tech: 1, clinch: 1, power: 1 } : amount >= 2 ? { tech: 1, power: 1 } : amount >= 1 ? { tech: 1 } : {};
+};
+const WEEK = { hard: { gain: 3, cardio: 2, fatigue: 22 }, moderate: { gain: 2, cardio: 1, fatigue: 8 }, light: { gain: 0, cardio: 0, fatigue: -25 },
+  sharpen: { gain: 1, cardio: 0, fatigue: 10 }, rest: { gain: 0, cardio: 0, fatigue: -35 } };
+/** What a week of this plan would do, before committing to it. */
+export function previewWeek(s: GameState, plan: WeekPlan | FinalPlan) {
+  const f = s.fight!, me = s.fighters.find(x => x.id === f.fighterId)!, w = WEEK[plan];
+  const ready = Math.max(0.4, 1 - me.fatigue / 120); // a worn-out athlete absorbs less
+  const gains: CampWeek['gains'] = Object.fromEntries(Object.entries(mainGain(s, w.gain)).map(([k, v]) => [k, Math.max(w.gain ? 1 : 0, Math.round(v! * ready))]));
+  if (w.cardio) gains.cardio = (gains.cardio ?? 0) + w.cardio;
+  return { gains, fatigueAfter: Math.max(0, Math.min(100, me.fatigue + w.fatigue)) };
+}
 /**
- * Chance of missing weight at the official weigh-in. A bigger gap between everyday and fighting weight and a tired
- * athlete raise it; a nutrition adviser lowers it. The game never models or rewards dehydration methods.
+ * Chance of missing weight at the official weigh-in: a probability, never a certainty. It grows with the gap between
+ * everyday and fighting weight and, above all, with how worn the athlete was going into the final week.
+ * The game never models or rewards dehydration methods.
  */
-export function missWeightChance(s: GameState, supported: boolean): number {
+export function missWeightChance(s: GameState, finalPlan: FinalPlan): number {
   const f = s.fight; if (!f) return 0; const p = PROSPECTS.find(p => p.id === f.fighterId)!; const me = s.fighters.find(x => x.id === f.fighterId)!;
-  const c = 0.04 + (p.walkKg - p.weightKg) * 0.035 + me.fatigue / 400 - (supported ? 0.09 : 0);
+  const wear = f.wearBeforeFinal ?? me.fatigue;
+  const c = 0.03 + (p.walkKg - p.weightKg) * 0.03 + Math.max(0, wear - 40) * 0.005 + (finalPlan === 'sharpen' ? 0.06 : -0.03);
   return Math.round(Math.min(0.6, Math.max(0.02, c)) * 100) / 100;
 }
-export function goToWeighIn(s: GameState, supported: boolean): Result {
-  if (s.step !== 'prefight' || !s.fight) return { ok: false, reason: 'step' };
-  if (supported && s.cash < TUNING.weighSupport) return { ok: false, reason: 'cash' };
-  let n = supported ? spend(s, TUNING.weighSupport, 'nutrition', 'adviser') : s;
-  const days = Math.max(0, s.fight.day - s.day);
-  const fighters = n.fighters.map(f => ({ ...f, fatigue: Math.max(0, f.fatigue - 12 * days) })); // taper and rest
-  n = { ...n, fighters, day: s.fight.day };
-  const [roll, seed] = rand(s.fight.rng); const [roll2, seed2] = rand(seed);
-  const made = roll >= missWeightChance(n, supported); const overKg = made ? 0 : Math.round((0.3 + roll2 * 1.2) * 10) / 10;
-  const fine = made ? 0 : Math.round(s.fight.purse * TUNING.weighFinePct / 100);
-  return { ok: true, state: { ...n, step: 'weighin', prestige: Math.max(0, n.prestige - (made ? 0 : 3)),
-    fight: { ...s.fight, rng: seed2, weighIn: { supported, made, overKg, fine }, energy: made ? 100 : 88 } } };
+/** What the coach would pick: push while fresh, back off when worn, never gamble the weigh-in. */
+export function coachPick(s: GameState): WeekPlan | FinalPlan {
+  const f = s.fight!, me = s.fighters.find(x => x.id === f.fighterId)!;
+  if (weeksLeft(f) <= 1) return me.fatigue > 45 ? 'rest' : 'sharpen';
+  return me.fatigue > 60 ? 'light' : me.fatigue < 35 ? 'hard' : 'moderate';
+}
+/** Runs one week of camp. The last week ends at the scales. */
+export function runCampWeek(s: GameState, plan: WeekPlan | FinalPlan | 'coach'): Result {
+  const f = s.fight; if (s.step !== 'camp' || !f || weeksLeft(f) <= 0) return { ok: false, reason: 'step' };
+  const final = weeksLeft(f) === 1; const by = plan === 'coach' ? 'coach' as const : 'player' as const;
+  const chosen = plan === 'coach' ? coachPick(s) : plan;
+  if (final !== (chosen === 'sharpen' || chosen === 'rest')) return { ok: false, reason: 'unknown' };
+  const me = s.fighters.find(x => x.id === f.fighterId)!; const pv = previewWeek(s, chosen); const g = pv.gains;
+  const wear = final ? me.fatigue : null;
+  const fighters = s.fighters.map(x => x.id !== f.fighterId ? { ...x, fatigue: Math.max(0, x.fatigue - 10) }
+    : { ...x, tech: x.tech + (g.tech ?? 0), clinch: x.clinch + (g.clinch ?? 0), power: x.power + (g.power ?? 0), cardio: x.cardio + (g.cardio ?? 0), fatigue: pv.fatigueAfter });
+  let n = advanceDays({ ...s, fighters }, 7);
+  let fight: Fight = { ...f, campLog: [...f.campLog, { week: f.campLog.length + 1, plan: chosen, by, gains: g, fatigueAfter: pv.fatigueAfter }], wearBeforeFinal: wear ?? f.wearBeforeFinal };
+  n = { ...n, fight };
+  if (!final) return { ok: true, state: n };
+  const chance = missWeightChance(n, chosen as FinalPlan);
+  const [roll, seed] = rand(f.rng); const [roll2, seed2] = rand(seed);
+  const made = roll >= chance; const overKg = made ? 0 : Math.round((0.3 + roll2 * 1.2) * 10) / 10;
+  fight = { ...fight, rng: seed2, weighIn: { made, overKg, fine: made ? 0 : Math.round(f.purse * TUNING.weighFinePct / 100), chance }, energy: made ? 100 : 88 };
+  return { ok: true, state: { ...n, day: f.day, step: 'weighin', prestige: Math.max(0, n.prestige - (made ? 0 : 3)), fight } };
+}
+/** "Set it once": the coach runs every remaining week, including the last one. */
+export function automateCamp(s: GameState): GameState {
+  let n = s; while (n.step === 'camp' && n.fight && weeksLeft(n.fight) > 0) { const r = runCampWeek(n, 'coach'); if (!r.ok) break; n = r.state; }
+  return n;
 }
 export function enterRing(s: GameState): GameState {
   return s.step === 'weighin' && s.fight ? { ...s, step: 'fight', fight: { ...s.fight, odds: openingOdds(s) } } : s;
@@ -359,7 +412,13 @@ export function migrate(raw: any): GameState | null {
     const fight = s.fight ? { opponentId: opponentFor(s.fight.fighterId).id, limitKg: PROSPECTS.find(p => p.id === s.fight.fighterId)!.weightKg, weighIn: null, ...s.fight, bets: [] } : null;
     s = { ...rest, saveVersion: 4, staff: s.staff.map((c: any) => ({ ...c, id: id(c.id) })), fight };
   }
-  return s.saveVersion === 4 ? s as GameState : null;
+  if (s.saveVersion === 4) {
+    const early = s.step === 'prefight';
+    const fight = s.fight ? { campWeeks: early ? TUNING.campWeeks : 0, campLog: [], wearBeforeFinal: null, ...s.fight, day: early ? s.day + TUNING.campWeeks * 7 : s.fight.day,
+      weighIn: s.fight.weighIn ? { chance: 0, ...s.fight.weighIn } : null } : null;
+    s = { ...s, saveVersion: 5, wageDay: TUNING.wageDay, step: early ? 'camp' : s.step, fight };
+  }
+  return s.saveVersion === 5 ? s as GameState : null;
 }
 const KEY = 'nakmuay-save-v1';
 export function save(s: GameState): void { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* storage unavailable */ } }

@@ -10,7 +10,8 @@ const withMat = () => ok(G.buyMat(placing(), 4, 3));
 const scouted = (coach: string, trip: string) => G.waitForScout(ok(G.sendScout(ok(G.hireCoach(withMat(), coach)), trip)));
 const roster = (coach = 'daeng', who = ['niran', 'mali']) => G.closeReport(who.reduce((s, id) => ok(G.offerContract(s, id)), scouted(coach, 'fair')));
 const booked = (who = ['niran', 'mali'], school: G.School = 'clinch') => ok(G.acceptOffer(G.seeOffer(G.runMorning(G.chooseSchool(G.planTraining(roster('daeng', who)), school)))));
-const atFight = (school: G.School = 'clinch') => G.enterRing(ok(G.goToWeighIn(booked(undefined, school), true)));
+const weeks = (s: GameState, plans: (G.WeekPlan | G.FinalPlan | 'coach')[]) => plans.reduce((a, p) => ok(G.runCampWeek(a, p)), s);
+const atFight = (school: G.School = 'clinch') => G.enterRing(weeks(booked(undefined, school), ['moderate', 'moderate', 'rest']));
 
 describe('opening economics', () => {
   it('starts on day 1 with 300,000, no camp, no people', () => {
@@ -121,27 +122,49 @@ describe('realism', () => {
     expect(booked(['mali']).fight!.limitKg).toBe(54);
   });
   it('most of the scouted pool is male', () => { expect(G.PROSPECTS.filter(p => p.sex === 'm').length).toBeGreaterThan(G.PROSPECTS.filter(p => p.sex === 'f').length); });
-  it('missing weight is more likely without support, with a bigger cut, and when tired', () => {
-    const petch = booked(['petch']), mali = booked(['mali']);
-    expect(G.missWeightChance(petch, false)).toBeGreaterThan(G.missWeightChance(petch, true));
-    expect(G.missWeightChance(petch, false)).toBeGreaterThan(G.missWeightChance(mali, false));
-    const tired = { ...mali, fighters: mali.fighters.map(f => ({ ...f, fatigue: 90 })) };
-    expect(G.missWeightChance(tired, false)).toBeGreaterThan(G.missWeightChance(mali, false));
+  it('camp advances one week per decision and ends at the scales', () => {
+    const b = booked(); expect(b.step).toBe('camp'); expect(G.weeksLeft(b.fight!)).toBe(3); expect(b.fight!.day).toBe(b.day + 21);
+    const w1 = ok(G.runCampWeek(b, 'hard')); expect(w1.day).toBe(b.day + 7); expect(w1.step).toBe('camp'); expect(G.weeksLeft(w1.fight!)).toBe(2);
+    expect(G.runCampWeek(w1, 'rest').ok).toBe(false);                       // final-week choices only in the final week
+    const w3 = weeks(w1, ['moderate', 'rest']); expect(w3.step).toBe('weighin'); expect(w3.day).toBe(b.fight!.day); expect(G.runCampWeek(w3, 'rest').ok).toBe(false);
   });
-  it('a missed weight is fined once, hurts prestige and weakens the athlete', () => {
+  it('weekly choices change attributes and wear', () => {
+    const b = booked(), me = (s: GameState) => s.fighters.find(f => f.id === s.fight!.fighterId)!;
+    const hard = ok(G.runCampWeek(b, 'hard')), light = ok(G.runCampWeek(b, 'light'));
+    expect(me(hard).clinch).toBeGreaterThan(me(b).clinch); expect(me(hard).fatigue).toBeGreaterThan(me(b).fatigue);
+    expect(me(light).clinch).toBe(me(b).clinch); expect(me(light).fatigue).toBeLessThan(me(b).fatigue);
+  });
+  it('arriving worn at the final week raises the chance of missing weight; training more raises it further', () => {
+    const fresh = weeks(booked(), ['light', 'light']), worn = weeks(booked(), ['hard', 'hard']);
+    expect(G.missWeightChance(worn, 'rest')).toBeGreaterThan(G.missWeightChance(fresh, 'rest'));
+    expect(G.missWeightChance(worn, 'sharpen')).toBeGreaterThan(G.missWeightChance(worn, 'rest'));
+    expect(G.missWeightChance(worn, 'sharpen')).toBeLessThan(1);
+    expect(G.missWeightChance(weeks(booked(['petch']), ['light', 'light']), 'rest')).toBeGreaterThan(G.missWeightChance(weeks(booked(['mali']), ['light', 'light']), 'rest'));
+  });
+  it('missing weight is a probability: worn athletes miss sometimes, not always', () => {
     let missed: GameState | null = null, made = 0;
-    for (let k = 1; k <= 200; k++) { const b = booked(['petch']); const w = ok(G.goToWeighIn({ ...b, fight: { ...b.fight!, rng: k * 104729 } }, false)); if (w.fight!.weighIn!.made) made++; else missed ??= w; }
-    expect(made).toBeGreaterThan(120); expect(made).toBeLessThan(190); expect(missed).not.toBeNull();
+    for (let k = 1; k <= 200; k++) { const b = weeks(booked(['petch']), ['hard', 'hard']); const w = ok(G.runCampWeek({ ...b, fight: { ...b.fight!, rng: k * 104729 } }, 'sharpen')); if (w.fight!.weighIn!.made) made++; else missed ??= w; }
+    expect(made).toBeGreaterThan(90); expect(made).toBeLessThan(175); expect(missed).not.toBeNull();
     const w = missed!; expect(w.fight!.weighIn!.fine).toBe(1200); expect(w.fight!.energy).toBe(88); expect(w.prestige).toBe(2);
     const done = G.settleFight(G.delegateRest(G.enterRing(w))); expect(done.ledger.filter(e => e.sourceType === 'weight-fine').map(e => e.amount)).toEqual([-1200]); reconciles(done);
   });
-  it('the nutritionist is paid once', () => { const b = booked(); const w = ok(G.goToWeighIn(b, true)); expect(w.cash).toBe(b.cash - 600); expect(G.goToWeighIn(w, true).ok).toBe(false); });
+  it('the coach can run one week or the whole camp', () => {
+    const b = booked(); const one = ok(G.runCampWeek(b, 'coach')); expect(one.fight!.campLog[0].by).toBe('coach'); expect(one.step).toBe('camp');
+    const all = G.automateCamp(b); expect(all.step).toBe('weighin'); expect(all.fight!.campLog).toHaveLength(3); expect(all.fight!.campLog.every(l => l.by === 'coach')).toBe(true);
+    expect(['sharpen', 'rest']).toContain(all.fight!.campLog[2].plan);
+  });
+  it('wages are paid once when pay day passes, and a shortfall becomes debt', () => {
+    const b = booked(); const paid = G.advanceDays(b, 40); const pay = G.monthlyPayroll(b);
+    expect(paid.ledger.filter(e => e.sourceType === 'payroll').map(e => e.amount)).toEqual([-pay]); expect(paid.wageDay).toBe(60); reconciles(paid);
+    const broke = G.advanceDays({ ...b, cash: 1000, ledger: [...b.ledger, { id: 99, day: 1, amount: 1000 - b.cash, sourceType: 'test', recipient: 'x' }] }, 40);
+    expect(broke.cash).toBe(0); expect(broke.debt).toBe(b.debt + pay - 1000); reconciles(broke);
+  });
 });
 describe('saves', () => {
   it('migrates older saves and keeps what was bought', () => {
     const v1: any = { saveVersion: 1, day: 1, region: 'bangkok', cash: 102_000, debt: 250_000, debtDueDay: 30, morale: 50, prestige: 5, step: 'placed', lang: 'pt',
       facilities: [{ id: 'mat-1', type: 'mat', x: 4, z: 3, w: 3, d: 2, level: 1 }], ledger: [{ id: 1, day: 1, amount: -190_000, sourceType: 'property', recipient: 'seller' }] };
-    const m = G.migrate(v1)!; expect(m.saveVersion).toBe(4); expect(m.step).toBe('coach'); expect(m.facilities).toHaveLength(1); expect(m.cash).toBe(102_000);
+    const m = G.migrate(v1)!; expect(m.saveVersion).toBe(5); expect(m.step).toBe('coach'); expect(m.facilities).toHaveLength(1); expect(m.cash).toBe(102_000);
   });
   it('save data round-trips mid-fight', () => {
     const s = G.simulateRound(atFight()); const back = G.migrate(JSON.parse(JSON.stringify(s)))!;
