@@ -16,5 +16,16 @@ Jogo de gestão de um camp de Muay Thai na Tailândia. Three.js + TypeScript + V
 Todos os valores em baht são fictícios, para balanceamento.
 
 ## Estado
-Feito: Cena 2 em Bangkok (erguer o portão, demarcar a área, comprar o tatame, salvar e recarregar).
-Planejado: coach, olheira, atletas, treino, lutas, apostas, Código do Camp, Phuket e Chiang Mai, áudio.
+Feito (tutorial completo, só Bangkok): cena das cadeiras, escolha do imóvel, portão, tatame, contratação do coach, missão da olheira,
+contratos com consentimento do atleta, escola de treino, primeira manhã, oferta de luta, noite de várzea round a round com
+orientação de córner, cotações e apostas fictícias, decisão dos juízes e acerto da bolsa no livro-caixa. Salva a cada decisão.
+
+Parcial: gráficos (cenário em blocos texturizados, sprites sem animação de quadro), som (só o gongo sintetizado).
+
+Planejado: Phuket e Chiang Mai, folha de pagamento no dia 30, dívida, Código do Camp, eventos, mais instalações, narração e música,
+os três destinos do camp.
+
+## Antes de lançar
+- Tailandês sem revisão de nativo.
+- Regras reais de repasse de bolsa e de contratos de atletas precisam de checagem jurídica; aqui são valores de jogo.
+- Apostas: só créditos fictícios, sem compra, saque ou prêmio. A classificação etária precisa ser revista por plataforma.

@@ -12,6 +12,15 @@ import rinUrl from '../assets/rin.webp';
 import cartUrl from '../assets/cart.webp';
 import plantsUrl from '../assets/plants.webp';
 import scooterUrl from '../assets/scooter.webp';
+import somchaiUrl from '../assets/somchai.webp';
+import daoUrl from '../assets/dao.webp';
+import maliUrl from '../assets/mali.webp';
+import niranUrl from '../assets/niran.webp';
+
+export const SPRITES: Record<string, string> = { rin: rinUrl, somchai: somchaiUrl, dao: daoUrl, mali: maliUrl, niran: niranUrl };
+export interface ActorSpec { id: string; x: number; z: number; away?: boolean; busy?: boolean; }
+interface Actor { sp: THREE.Sprite; gx: number; gz: number; away: boolean; busy: boolean; phase: number; }
+const GATE = { x: 6, z: 0.5 }, OUTSIDE = { x: 6, z: -3.4 };
 
 const PIXEL = 2; // screen pixels per rendered pixel (chunky pixel-art look)
 
@@ -43,7 +52,7 @@ export class CampScene {
   private target = new THREE.Vector3(GRID.w / 2, 0, GRID.d / 2 - 0.6);
   private shutter!: THREE.Mesh; private shutterOpen = 0; private shutterGoal = 0;
   private tube!: THREE.PointLight; private tubeMesh!: THREE.Mesh;
-  private rin!: THREE.Sprite; private rinGoal = -3.2;
+  private actors = new Map<string, Actor>();
   private ghost!: THREE.Mesh; private rain!: THREE.Points; private drip!: THREE.Mesh;
   private facilityGroup = new THREE.Group(); private built = new Map<string, THREE.Group>();
   private ray = new THREE.Raycaster(); private plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -132,9 +141,6 @@ export class CampScene {
     // generated prop sprites
     s.add(sprite(cartUrl, 2.3, 9.9, -2.3), sprite(plantsUrl, 1.5, 12.9, 2.2), sprite(plantsUrl, 1.3, -0.9, -1.3), sprite(plantsUrl, 1.2, 2.6, 9.1), sprite(scooterUrl, 1.15, 13.3, 6.4));
 
-    // --- Rin (billboard pixel sprite) ---
-    this.rin = sprite(rinUrl, 1.45, 6, -3.2); s.add(this.rin);
-
     // --- placement ghost ---
     this.ghost = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: '#f0e5cd', transparent: true, opacity: 0.55, depthTest: false }));
     this.ghost.rotation.x = -Math.PI / 2; this.ghost.visible = false; this.ghost.renderOrder = 5; s.add(this.ghost);
@@ -169,8 +175,21 @@ export class CampScene {
   }
 
   setGate(open: boolean, instant = false) {
-    this.shutterGoal = open ? 1 : 0; this.rinGoal = open ? 1.6 : -3.2;
-    if (instant) { this.shutterOpen = this.shutterGoal; this.rin.position.z = this.rinGoal; }
+    this.shutterGoal = open ? 1 : 0; if (instant) this.shutterOpen = this.shutterGoal;
+  }
+  /** People in the camp, straight from simulation data: one sprite per entity. Newcomers walk in through the gate. */
+  setActors(list: ActorSpec[], instant = false) {
+    for (const [id, a] of this.actors) if (!list.some(l => l.id === id)) { this.scene.remove(a.sp); this.actors.delete(id); }
+    for (const l of list) {
+      let a = this.actors.get(l.id);
+      if (!a) {
+        const start = instant ? (l.away ? OUTSIDE : l) : OUTSIDE;
+        const sp = sprite(SPRITES[l.id], 1.45, start.x, start.z); this.scene.add(sp);
+        a = { sp, gx: l.x, gz: l.z, away: false, busy: false, phase: this.actors.size * 1.7 }; this.actors.set(l.id, a);
+      }
+      a.away = !!l.away; a.busy = !!l.busy; a.gx = a.away ? OUTSIDE.x : l.x; a.gz = a.away ? OUTSIDE.z - 1.2 : l.z;
+      if (instant) { a.sp.position.x = a.gx; a.sp.position.z = a.gz; }
+    }
   }
   setGhost(g: { x: number; z: number; w: number; d: number; valid: boolean } | null) {
     this.ghost.visible = !!g; if (!g) return;
@@ -198,9 +217,21 @@ export class CampScene {
     this.shutter.scale.y = 1 - this.shutterOpen * 0.86;
     const lit = this.shutterOpen > 0.5 ? (Math.sin(time * 23) > -0.96 || this.reduced ? 1 : 0.35) : 0;
     this.tube.intensity = 24 * lit; (this.tubeMesh.material as THREE.MeshBasicMaterial).color.set(lit > 0.5 ? '#fff1cf' : '#3a3833');
-    this.rin.position.z += (this.rinGoal - this.rin.position.z) * Math.min(1, dt * (this.reduced ? 60 : 1.2));
-    const moving = Math.abs(this.rinGoal - this.rin.position.z) > 0.08;
-    this.rin.position.y = (moving ? Math.abs(Math.sin(time * 9)) * 0.07 : 0);
+    for (const a of this.actors.values()) {
+      const p = a.sp.position;
+      // Walk through the doorway instead of through the wall.
+      const outside = p.z < 0.2, goalOutside = a.gz < 0.2; let tx = a.gx, tz = a.gz;
+      if (outside !== goalOutside) {
+        if (outside) { tx = GATE.x; tz = Math.abs(p.x - GATE.x) > 0.1 ? p.z : GATE.z + 0.1; }
+        else { tx = GATE.x; tz = Math.abs(p.x - GATE.x) > 0.1 || p.z > GATE.z + 0.2 ? GATE.z : -0.5; }
+      }
+      const dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz), far = Math.hypot(a.gx - p.x, a.gz - p.z), step = (this.reduced ? 40 : 2.6) * dt;
+      if (d > 0.03) { p.x += dx / d * Math.min(step, d); p.z += dz / d * Math.min(step, d); }
+      const moving = far > 0.06;
+      a.sp.visible = !(a.away && !moving);
+      p.y = moving ? Math.abs(Math.sin(time * 9 + a.phase)) * 0.07 : a.busy && !this.reduced ? Math.abs(Math.sin(time * 6 + a.phase)) * 0.12 : 0;
+      a.sp.material.rotation = a.busy && !moving && !this.reduced ? Math.sin(time * 6 + a.phase) * 0.08 : 0;
+    }
     this.drip.position.y = 2.6 - ((time * 1.7) % 1) * 2.6;
     const p = this.rain.geometry.getAttribute('position') as THREE.BufferAttribute;
     for (let i = 0; i < p.count; i++) { let y = p.getY(i) - dt * 14; if (y < 0) y += 12; p.setY(i, y); }
